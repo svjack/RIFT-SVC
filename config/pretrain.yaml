@@ -13,7 +13,7 @@ dataset:
   sample_rate: 44100
   n_mel_channels: 128
   hop_length: 256
-  max_frame_len: 1024
+  max_frame_len: 512
 
 training:
   learning_rate: 1e-3

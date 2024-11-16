@@ -1,4 +1,4 @@
-exp_name: "128-4"
+exp_name: "dit-256-4"
 cfg:
   dim: 256
   depth: 4
