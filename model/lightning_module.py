@@ -97,6 +97,9 @@ class RIFTSVCLightningModule(LightningModule):
     def validation_step(self, batch, batch_idx):
         if not self.trainer.is_global_zero:
             return
+        
+        global_step = self.trainer.global_step
+        save_every_n_steps = self.trainer.callbacks[0].every_n_train_steps
 
         spk_id = batch['spk_id']
         mel_gt = batch['mel_spec']
@@ -138,28 +141,47 @@ class RIFTSVCLightningModule(LightningModule):
             self.mse.append(F.mse_loss(mel_gen_i, mel_gt_i).cpu().item())
 
             os.makedirs('.cache', exist_ok=True)
-            torchaudio.save(f".cache/{sample_idx}_gen.wav", wav_gen.cpu().to(torch.float32), 44100)
-            torchaudio.save(f".cache/{sample_idx}_gt.wav", wav_gt.cpu().to(torch.float32), 44100)
-
-            self.logger.experiment.log({
-                f"val-audio/{sample_idx}_gen": wandb.Audio(f".cache/{sample_idx}_gen.wav", sample_rate=44100),
-                f"val-audio/{sample_idx}_gt": wandb.Audio(f".cache/{sample_idx}_gt.wav", sample_rate=44100)
-            }, step=self.global_step)
-
-            # Save and log spectrograms
-            fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 15), sharex=True, gridspec_kw={'hspace': 0})
+            if global_step % save_every_n_steps == 0:
+                torchaudio.save(f".cache/{sample_idx}_gen.wav", wav_gen.cpu().to(torch.float32), 44100)
+                self.logger.experiment.log({
+                    f"val-audio/{sample_idx}_gen": wandb.Audio(f".cache/{sample_idx}_gen.wav", sample_rate=44100),
+                }, step=self.global_step)
             
-            ax1.imshow(mel_gt_i.squeeze().T.cpu().numpy(), origin='lower', aspect='auto')
-            ax1.set_ylabel('GT')
-            ax1.set_xticks([])
-            ax2.imshow(mel_gen_i.squeeze().T.cpu().numpy(), origin='lower', aspect='auto')
-            ax2.set_ylabel('Gen')
-            ax2.set_xticks([])
-            ax3.imshow(mel_gen_i.squeeze().T.cpu().numpy() - mel_gt_i.squeeze().T.cpu().numpy(), origin='lower', aspect='auto')
-            ax3.set_ylabel('Diff')
-            plt.savefig(f".cache/{sample_idx}_mel.jpg")
-            plt.close()
+            if global_step == 0:
+                torchaudio.save(f".cache/{sample_idx}_gt.wav", wav_gt.cpu().to(torch.float32), 44100)
+                self.logger.experiment.log({
+                    f"val-audio/{sample_idx}_gt": wandb.Audio(f".cache/{sample_idx}_gt.wav", sample_rate=44100)
+                }, step=self.global_step)
 
-            self.logger.experiment.log({
-                f"val-mel/{sample_idx}_mel": wandb.Image(f".cache/{sample_idx}_mel.jpg")
-            }, step=self.global_step)
+            if global_step % save_every_n_steps == 0:
+                # Compute global min and max for consistent scaling across all plots
+                data_gt = mel_gt_i.squeeze().T.cpu().numpy()
+                data_gen = mel_gen_i.squeeze().T.cpu().numpy()
+                data_diff = data_gen - data_gt
+                vmin = min(data_gt.min(), data_gen.min(), data_diff.min())
+                vmax = max(data_gt.max(), data_gen.max(), data_diff.max())
+                
+                # Create figure with space for colorbar
+                fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 15), sharex=True, gridspec_kw={'hspace': 0})
+                
+                # Plot all spectrograms with the same scale
+                im1 = ax1.imshow(data_gt, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
+                ax1.set_ylabel('GT', fontsize=14)
+                ax1.set_xticks([])
+                
+                im2 = ax2.imshow(data_gen, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
+                ax2.set_ylabel('Gen', fontsize=14)
+                ax2.set_xticks([])
+                
+                im3 = ax3.imshow(data_diff, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
+                ax3.set_ylabel('Diff', fontsize=14)
+                
+                # Add single shared colorbar
+                fig.colorbar(im1, ax=[ax1, ax2, ax3], location='right')
+                
+                plt.savefig(f".cache/{sample_idx}_mel.jpg", quality=85, bbox_inches='tight')
+                plt.close()
+
+                self.logger.experiment.log({
+                    f"val-mel/{sample_idx}_mel": wandb.Image(f".cache/{sample_idx}_mel.jpg")
+                }, step=self.global_step)
