@@ -10,11 +10,12 @@ import torchaudio
 import wandb
 from PIL import Image
 from pytorch_lightning import LightningModule
+from pytorch_lightning.utilities import grad_norm
 
 import model.BigVGAN.bigvgan as bigvgan
 from model.metrics import mcd, psnr, si_snr, snr
 from model.modules import get_mel_spectrogram
-from model.utils import draw_mel_specs
+from model.utils import draw_mel_specs, l2_grad_norm
 
 
 class RIFTSVCLightningModule(LightningModule):
@@ -162,15 +163,20 @@ class RIFTSVCLightningModule(LightningModule):
                 # Compute global min and max for consistent scaling across all plots
                 data_gt = mel_gt_i.squeeze().T.cpu().numpy()
                 data_gen = mel_gen_i.squeeze().T.cpu().numpy()
-                data_diff = data_gen - data_gt
+                data_abs_diff = data_gen - data_gt
 
                 cache_path = f".cache/{sample_idx}_mel.jpg"
-                draw_mel_specs(data_gt, data_gen, data_diff, cache_path)
+                draw_mel_specs(data_gt, data_gen, data_abs_diff, cache_path)
 
                 self.logger.experiment.log({
                     f"val-mel/{sample_idx}_mel": wandb.Image(cache_path)
                 }, step=self.global_step)
 
+    def on_before_optimizer_step(self, optimizer):
+        # Calculate gradient norm
+        norm = l2_grad_norm(self.model)
+
+        self.log('train/grad_norm', norm, prog_bar=True, logger=True)
 
     @property
     def global_step(self):

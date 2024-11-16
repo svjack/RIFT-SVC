@@ -29,8 +29,8 @@ def default(v: Any, d: Any) -> Any:
 
 
 def draw_mel_specs(gt: np.ndarray, gen: np.ndarray, diff: np.ndarray, cache_path: str):
-    vmin = min(gt.min(), gen.min(), diff.min())
-    vmax = max(gt.max(), gen.max(), diff.max())
+    vmin = min(gt.min(), gen.min())
+    vmax = max(gt.max(), gen.max())
     
     # Create figure with space for colorbar
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 15), sharex=True, gridspec_kw={'hspace': 0})
@@ -44,12 +44,12 @@ def draw_mel_specs(gt: np.ndarray, gen: np.ndarray, diff: np.ndarray, cache_path
     ax2.set_ylabel('Gen', fontsize=14)
     ax2.set_xticks([])
     
-    im3 = ax3.imshow(diff, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
+    im3 = ax3.imshow(diff, origin='lower', aspect='auto')
     ax3.set_ylabel('Diff', fontsize=14)
     
-    # Add single shared colorbar
-    fig.colorbar(im1, ax=[ax1, ax2, ax3], location='right')
-    
+    fig.colorbar(im1, ax=[ax1, ax2], location='right', label='Magnitude')
+    fig.colorbar(im3, ax=[ax3], location='right', label='Difference')
+
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight')
     plt.close()
@@ -75,3 +75,7 @@ def lens_to_mask(
 
     seq = torch.arange(length, device = t.device)
     return seq < t[..., None]
+
+
+def l2_grad_norm(model: torch.nn.Module):
+    return torch.cat([p.grad.data.flatten() for p in model.parameters() if p.grad is not None]).norm(2)
