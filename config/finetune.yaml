@@ -29,6 +29,7 @@ training:
   wandb_project: "RIFT-SVC"
   wandb_run_name: "finetune_${model.exp_name}_${training.max_steps}steps-lr${training.learning_rate}" 
   checkpoint_path: "ckpts/finetune_${model.exp_name}_${training.max_steps}steps-lr${training.learning_rate}"
+  save_weights_only: true
   num_workers: 16
   eval_sample_steps: 32
   eval_cfg_strength: 2.0

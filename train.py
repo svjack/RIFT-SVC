@@ -100,6 +100,7 @@ def main(cfg: DictConfig):
         save_top_k=-1,
         save_last='link',
         every_n_train_steps=cfg.training.save_per_steps,
+        save_weights_only=cfg.training.save_weights_only,
     )
 
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
