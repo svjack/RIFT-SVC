@@ -1,17 +1,17 @@
-# train.py
+import time
+
 import hydra
-from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
+from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
+from pytorch_lightning.loggers import WandbLogger
 from schedulefree import AdamWScheduleFree
+from torch.utils.data import DataLoader
 
 from model import CFM, DiT
+from model.dataset import collate_fn, load_svc_dataset
 from model.lightning_module import RIFTSVCLightningModule
-from model.dataset import load_svc_dataset, collate_fn
-from pytorch_lightning.callbacks import TQDMProgressBar
-import time
+
 
 class CustomProgressBar(TQDMProgressBar):
     def __init__(self):
