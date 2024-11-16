@@ -133,7 +133,7 @@ def main(cfg: DictConfig):
         log_every_n_steps=1,
     )
 
-
+    optimizer.train()
     trainer.fit(
         model,
         train_dataloaders=DataLoader(

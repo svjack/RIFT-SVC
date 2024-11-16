@@ -60,6 +60,7 @@ class RIFTSVCLightningModule(LightningModule):
         return loss
     
     def on_validation_start(self):
+        self.optimizer.eval()
         if not self.trainer.is_global_zero:
             return
 
@@ -79,6 +80,7 @@ class RIFTSVCLightningModule(LightningModule):
         self.mse = []
 
     def on_validation_end(self):
+        self.optimizer.train()
         if not self.trainer.is_global_zero:
             return
 
