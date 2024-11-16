@@ -1,17 +1,20 @@
-from pytorch_lightning import LightningModule
-import wandb
+import gc
+import io
+import os
+
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torchaudio
-import matplotlib.pyplot as plt
-import numpy as np
-import gc
-import os
+import wandb
+from PIL import Image
+from pytorch_lightning import LightningModule
 
-from model.utils import exists, default
-from model.modules import get_mel_spectrogram
 import model.BigVGAN.bigvgan as bigvgan
-from model.metrics import mcd, si_snr, psnr, snr
+from model.metrics import mcd, psnr, si_snr, snr
+from model.modules import get_mel_spectrogram
+from model.utils import draw_mel_specs
 
 
 class RIFTSVCLightningModule(LightningModule):
@@ -98,8 +101,8 @@ class RIFTSVCLightningModule(LightningModule):
         if not self.trainer.is_global_zero:
             return
         
-        global_step = self.trainer.global_step
-        save_every_n_steps = self.trainer.callbacks[0].every_n_train_steps
+        global_step = self.global_step
+        log_media_every_n_steps = self.log_media_every_n_steps
 
         spk_id = batch['spk_id']
         mel_gt = batch['mel_spec']
@@ -141,7 +144,7 @@ class RIFTSVCLightningModule(LightningModule):
             self.mse.append(F.mse_loss(mel_gen_i, mel_gt_i).cpu().item())
 
             os.makedirs('.cache', exist_ok=True)
-            if global_step % save_every_n_steps == 0:
+            if global_step % log_media_every_n_steps == 0:
                 torchaudio.save(f".cache/{sample_idx}_gen.wav", wav_gen.cpu().to(torch.float32), 44100)
                 self.logger.experiment.log({
                     f"val-audio/{sample_idx}_gen": wandb.Audio(f".cache/{sample_idx}_gen.wav", sample_rate=44100),
@@ -153,35 +156,33 @@ class RIFTSVCLightningModule(LightningModule):
                     f"val-audio/{sample_idx}_gt": wandb.Audio(f".cache/{sample_idx}_gt.wav", sample_rate=44100)
                 }, step=self.global_step)
 
-            if global_step % save_every_n_steps == 0:
+            if global_step % log_media_every_n_steps == 0:
                 # Compute global min and max for consistent scaling across all plots
                 data_gt = mel_gt_i.squeeze().T.cpu().numpy()
                 data_gen = mel_gen_i.squeeze().T.cpu().numpy()
                 data_diff = data_gen - data_gt
-                vmin = min(data_gt.min(), data_gen.min(), data_diff.min())
-                vmax = max(data_gt.max(), data_gen.max(), data_diff.max())
-                
-                # Create figure with space for colorbar
-                fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(20, 15), sharex=True, gridspec_kw={'hspace': 0})
-                
-                # Plot all spectrograms with the same scale
-                im1 = ax1.imshow(data_gt, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
-                ax1.set_ylabel('GT', fontsize=14)
-                ax1.set_xticks([])
-                
-                im2 = ax2.imshow(data_gen, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
-                ax2.set_ylabel('Gen', fontsize=14)
-                ax2.set_xticks([])
-                
-                im3 = ax3.imshow(data_diff, origin='lower', aspect='auto', vmin=vmin, vmax=vmax)
-                ax3.set_ylabel('Diff', fontsize=14)
-                
-                # Add single shared colorbar
-                fig.colorbar(im1, ax=[ax1, ax2, ax3], location='right')
-                
-                plt.savefig(f".cache/{sample_idx}_mel.jpg", quality=85, bbox_inches='tight')
-                plt.close()
+
+                cache_path = f".cache/{sample_idx}_mel.jpg"
+                draw_mel_specs(data_gt, data_gen, data_diff, cache_path)
 
                 self.logger.experiment.log({
-                    f"val-mel/{sample_idx}_mel": wandb.Image(f".cache/{sample_idx}_mel.jpg")
+                    f"val-mel/{sample_idx}_mel": wandb.Image(cache_path)
                 }, step=self.global_step)
+
+
+    @property
+    def global_step(self):
+        return self.trainer.global_step
+
+    @property
+    def log_media_every_n_steps(self):
+        if self.save_every_n_steps is None:
+            return self.trainer.val_check_interval
+        return self.save_every_n_steps
+    
+    @property
+    def save_every_n_steps(self):
+        for callback in self.trainer.callbacks:
+            if hasattr(callback, 'every_n_train_steps'):
+                return callback.every_n_train_steps
+        return None
