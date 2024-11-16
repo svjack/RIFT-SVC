@@ -31,15 +31,7 @@ from tqdm import tqdm
 import numpy as np
 from multiprocessing import Process, Queue, current_process, cpu_count
 
-# Import the RMVPE class
-# Ensure that the RMVPE class and its dependencies are accessible.
-# Adjust the import path based on your project structure.
-# For example, if RMVPE is in a module named model.rmvpe.inference, ensure that
-# the 'model' directory is in the PYTHONPATH or handled appropriately.
-
-# Here, we're assuming that RMVPE is defined elsewhere and can be imported.
-# Replace the following line with the correct import statement based on your project.
-from model.rmvpe.inference import RMVPE  # Adjust this import as necessary
+from model.rmvpe.inference import RMVPE
 
 def post_process_f0(f0, sample_rate, hop_length, n_frames, silence_front=0.0):
     """
