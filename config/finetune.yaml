@@ -1,0 +1,29 @@
+defaults:
+  - _self_
+  - model: F5_small
+
+dataset:
+  data_dir: "data/finetune"
+  meta_info_path: "data/finetune/meta_info.json"
+  sample_rate: 44100
+  n_mel_channels: 128
+  hop_length: 256
+  max_frame_len: 1024
+
+training:
+  learning_rate: 1e-4
+  batch_size_per_gpu: 64
+  batch_size_type: "sample"  # Options: "frame" or "sample"
+  max_samples: 64
+  grad_accumulation_steps: 1
+  max_grad_norm: 10.0
+  epochs: 100
+  num_warmup_updates: 365
+  save_per_updates: 3650
+  test_per_updates: 365
+  last_per_steps: 3650
+  wandb_project: "F5SVC"
+  wandb_run_name: "${model.exp_name}"  # Dynamically set run name based on exp_name
+  checkpoint_path: "ckpts/${model.exp_name}"
+  resumable_with_seed: 666
+  num_workers: 8

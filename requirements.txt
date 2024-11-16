@@ -1,0 +1,16 @@
+click
+einops
+hydra-core
+jaxtyping
+librosa
+matplotlib
+numpy
+omegaconf
+pytorch_lightning
+schedulefree
+thop
+torchdiffeq
+tqdm
+transformers
+wandb
+x_transformers

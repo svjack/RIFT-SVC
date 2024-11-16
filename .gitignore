@@ -1,0 +1,14 @@
+__pycache__/
+pretrained/*
+data/*
+wandb/*
+outputs/*
+ckpts/*
+mels/*
+
+.vscode/*
+.cache/*
+
+!pretrained/README.md
+!data/README.md
+!ckpts/README.md
