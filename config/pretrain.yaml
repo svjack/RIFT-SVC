@@ -5,7 +5,7 @@ seed: 2025
 
 defaults:
   - _self_
-  - model: 128-4
+  - model: dit-256-4
 
 dataset:
   data_dir: "data/pretrain"
@@ -27,8 +27,8 @@ training:
   save_per_steps: 10000
   test_per_steps: 2000
   wandb_project: "RIFT-SVC"
-  wandb_run_name: "${model.exp_name}" 
-  checkpoint_path: "ckpts/${model.exp_name}"
+  wandb_run_name: "pretrain_${model.exp_name}_${training.max_steps}steps-lr${training.learning_rate}" 
+  checkpoint_path: "ckpts/pretrain_${model.exp_name}_${training.max_steps}steps-lr${training.learning_rate}"
   num_workers: 16
   eval_sample_steps: 32
   eval_cfg_strength: 2.0
