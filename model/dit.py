@@ -105,7 +105,7 @@ class DiT(nn.Module):
 
     def _init_weights(self, module: nn.Module):
         if isinstance(module, nn.Linear):
-            fan_in, fan_out = module.weight.shape
+            fan_out, fan_in = module.weight.shape
             # Spectral parameterization from the [paper](https://arxiv.org/abs/2310.17813).
             init_std = (self.init_std / math.sqrt(fan_in)) * min(1, math.sqrt(fan_out / fan_in))
             torch.nn.init.normal_(module.weight, mean=0.0, std=init_std)

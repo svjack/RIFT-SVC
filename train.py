@@ -52,13 +52,29 @@ class CustomProgressBar(TQDMProgressBar):
 
 
 def configure_optimizers(model, lr, betas, weight_decay, warmup_steps):
-    optimizer = AdamWScheduleFree(
-        model.parameters(),
-        lr=lr,
-        betas=betas,
-        weight_decay=weight_decay,
-        warmup_steps=warmup_steps,
-    )
+    from collections import defaultdict
+    param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
+    specp_decay_params = defaultdict(list)
+    decay_params = []
+    nodecay_params = []
+    for n, p in param_dict.items():
+        if p.dim() >= 2:
+            if n.endswith('out.weight') or n.endswith('proj.weight'):
+                fan_out, fan_in = p.shape[-2:]
+                fan_ratio = fan_out / fan_in
+                specp_decay_params[f"specp_decay_{fan_ratio:.2f}"].append((p, lr * fan_ratio))
+            else:
+                decay_params.append((n, p))
+        else:
+            nodecay_params.append(p)
+    optim_groups = [
+        {'params': decay_params, 'weight_decay': weight_decay, 'lr': lr},
+        {'params': nodecay_params, 'weight_decay': 0.0, 'lr': lr}
+    ] + [
+        {'params': p, 'weight_decay': weight_decay, 'lr': lr}
+        for p, lr in specp_decay_params.values()
+    ]
+    optimizer = AdamWScheduleFree(optim_groups, betas=betas, warmup_steps=warmup_steps)
     return optimizer
 
 
