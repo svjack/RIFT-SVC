@@ -108,6 +108,8 @@ def main(cfg: DictConfig):
     cfm = CFM(
         transformer=transformer,
         num_mel_channels=cfg.dataset.n_mel_channels,
+        spk_drop_prob=cfg.model.get('spk_drop_prob', 0.2),
+        lognorm=cfg.model.get('lognorm', False),
     )
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)

@@ -1,5 +1,4 @@
-from __future__ import annotations
-from typing import Callable
+import math
 import random
 
 import torch
@@ -27,6 +26,7 @@ class CFM(nn.Module):
         ),
         spk_drop_prob: float = 0.2,
         num_mel_channels: int | None = 128,
+        lognorm: bool = False,
     ):
         super().__init__()
 
@@ -48,6 +48,8 @@ class CFM(nn.Module):
 
         self.mel_min = -12
         self.mel_max = 2
+
+        self.lognorm = lognorm
 
     @property
     def device(self):
@@ -147,19 +149,21 @@ class CFM(nn.Module):
         # Handle lengths and masks
         if not exists(lens):
             lens = torch.full((batch,), seq_len, device=device)
-        
+
         mask = lens_to_mask(lens, length=seq_len)  # Typically padded to max length in batch
 
-        # x1 is mel
         x1 = self.norm_mel(inp)
-
-        # x0 is Gaussian noise
         x0 = torch.randn_like(x1)
 
-        # Time steps
-        time = torch.rand((batch,), dtype=dtype, device=self.device)
+        if self.lognorm:
+            quantiles = torch.linspace(0, 1, batch + 1).to(x1.device)
+            z = quantiles[:-1] + torch.rand((batch,)).to(x1.device) / batch
+            # now transform to normal
+            z = torch.erfinv(2 * z - 1) * math.sqrt(2)
+            time = torch.sigmoid(z)
+        else:
+            time = torch.rand((batch,), dtype=dtype, device=self.device)
 
-        # Sample xt (φ_t(x) in the paper)
         t = rearrange(time, 'b -> b 1 1')
         φ = (1 - t) * x0 + t * x1
         flow = x1 - x0
