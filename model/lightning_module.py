@@ -191,6 +191,6 @@ class RIFTSVCLightningModule(LightningModule):
     @property
     def save_every_n_steps(self):
         for callback in self.trainer.callbacks:
-            if hasattr(callback, 'every_n_train_steps'):
-                return callback.every_n_train_steps
+            if hasattr(callback, '_every_n_train_steps'):
+                return callback._every_n_train_steps
         return None
