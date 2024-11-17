@@ -55,6 +55,7 @@ def configure_optimizers(model, lr, betas, weight_decay, warmup_steps):
     from collections import defaultdict
     param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
     specp_decay_params = defaultdict(list)
+    specp_decay_lr = {}
     decay_params = []
     nodecay_params = []
     for n, p in param_dict.items():
@@ -62,18 +63,21 @@ def configure_optimizers(model, lr, betas, weight_decay, warmup_steps):
             if n.endswith('out.weight') or n.endswith('proj.weight'):
                 fan_out, fan_in = p.shape[-2:]
                 fan_ratio = fan_out / fan_in
-                specp_decay_params[f"specp_decay_{fan_ratio:.2f}"].append((p, lr * fan_ratio))
+                specp_decay_params[f"specp_decay_{fan_ratio:.2f}"].append(p)
+                specp_decay_lr[f"specp_decay_{fan_ratio:.2f}"] = lr * fan_ratio
             else:
-                decay_params.append((n, p))
+                decay_params.append(p)
         else:
             nodecay_params.append(p)
+    
     optim_groups = [
         {'params': decay_params, 'weight_decay': weight_decay, 'lr': lr},
         {'params': nodecay_params, 'weight_decay': 0.0, 'lr': lr}
     ] + [
-        {'params': p, 'weight_decay': weight_decay, 'lr': lr}
-        for p, lr in specp_decay_params.values()
+        {'params': params, 'weight_decay': weight_decay, 'lr': specp_decay_lr[group_name]}
+        for group_name, params in specp_decay_params.items()
     ]
+    
     optimizer = AdamWScheduleFree(optim_groups, betas=betas, warmup_steps=warmup_steps)
     return optimizer
 
