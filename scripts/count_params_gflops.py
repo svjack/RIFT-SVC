@@ -14,11 +14,10 @@ import click
 @click.option('--frame_len', type=int, default=1024, help='Frame length')
 def main(dim, depth, n_mel_channels, frame_len):
     cvec_dim = 768
-    heads = int(dim // 64)
     transformer = DiT(
         dim=dim,
         depth=depth,
-        heads=heads,
+        head_dim=64,
         ff_mult=4,
         cvec_dim=cvec_dim
     )
@@ -36,7 +35,7 @@ def main(dim, depth, n_mel_channels, frame_len):
         )
     )
 
-    print(f"dim: {dim}, depth: {depth}, heads: {heads}")
+    print(f"dim: {dim}, depth: {depth}")
     print(f"FLOPs: {flops / 1e9} G")
     print(f"Params: {params / 1e6} M")
 
