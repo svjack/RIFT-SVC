@@ -51,6 +51,17 @@ class CustomProgressBar(TQDMProgressBar):
         })
 
 
+def configure_optimizers(model, lr, betas, weight_decay, warmup_steps):
+    optimizer = AdamWScheduleFree(
+        model.parameters(),
+        lr=lr,
+        betas=betas,
+        weight_decay=weight_decay,
+        warmup_steps=warmup_steps,
+    )
+    return optimizer
+
+
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(cfg: DictConfig):
     pl.seed_everything(cfg.seed)
@@ -80,13 +91,8 @@ def main(cfg: DictConfig):
     )
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
-    optimizer = AdamWScheduleFree(
-        cfm.parameters(),
-        lr=cfg.training.learning_rate,
-        betas=eval(cfg.training.betas),
-        weight_decay=cfg.training.weight_decay,
-        warmup_steps=warmup_steps,
-    )
+    optimizer = configure_optimizers(
+        cfm, cfg.training.learning_rate, eval(cfg.training.betas), cfg.training.weight_decay, warmup_steps)
     model = RIFTSVCLightningModule(
         model=cfm,
         optimizer=optimizer,
