@@ -1,3 +1,4 @@
+name: dit-256-4
 cfg:
   dim: 256
   depth: 4

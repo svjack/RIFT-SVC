@@ -1,3 +1,4 @@
+name: dit-384-4
 cfg:
   dim: 384
   depth: 4

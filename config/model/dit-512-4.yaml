@@ -1,3 +1,4 @@
+name: dit-512-4
 cfg:
   dim: 512
   depth: 4
