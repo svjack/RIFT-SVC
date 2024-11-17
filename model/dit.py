@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -61,7 +62,7 @@ class InputEmbedding(nn.Module):
 class DiT(nn.Module):
     def __init__(self,
                  dim: int, depth: int, head_dim: int, dropout: float = 0.1, ff_mult: int = 4,
-                 mel_dim: int = 128, num_speaker: int = 1, cvec_dim: int = 768):
+                 mel_dim: int = 128, num_speaker: int = 1, cvec_dim: int = 768, init_std: float = 1):
         super().__init__()
 
         self.num_speaker = num_speaker
@@ -91,6 +92,7 @@ class DiT(nn.Module):
         self.norm_out = AdaLayerNormZero_Final(dim)  # final modulation
         self.output = nn.Linear(dim, mel_dim)
 
+        self.init_std = init_std
         self.apply(self._init_weights)
         for block in self.transformer_blocks:
             torch.nn.init.constant_(block.attn_norm.proj.weight, 0)
@@ -103,11 +105,14 @@ class DiT(nn.Module):
 
     def _init_weights(self, module: nn.Module):
         if isinstance(module, nn.Linear):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            fan_in, fan_out = module.weight.shape
+            # Spectral parameterization from the [paper](https://arxiv.org/abs/2310.17813).
+            init_std = (self.init_std / math.sqrt(fan_in)) * min(1, math.sqrt(fan_out / fan_in))
+            torch.nn.init.normal_(module.weight, mean=0.0, std=init_std)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
-            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            torch.nn.init.normal_(module.weight, mean=0.0, std=self.init_std/math.sqrt(self.dim))
 
 
     def forward(
