@@ -1,0 +1,6 @@
+name: dit-768-12
+cfg:
+  dim: 768
+  depth: 8
+  head_dim: 64
+  ff_mult: 4

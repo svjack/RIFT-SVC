@@ -1,0 +1,6 @@
+name: dit-512-8
+cfg:
+  dim: 512
+  depth: 8
+  head_dim: 64
+  ff_mult: 4
