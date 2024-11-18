@@ -102,6 +102,8 @@ class DiT(nn.Module):
             torch.nn.init.constant_(block.attn_norm.proj.weight, 0)
             torch.nn.init.constant_(block.attn_norm.proj.bias, 0)
 
+        torch.nn.init.constant_(self.cond_embed.mlp.mlp_out.weight, 0)
+        torch.nn.init.constant_(self.input_embed.mlp.mlp_out.weight, 0)
         torch.nn.init.constant_(self.norm_out.proj.weight, 0)
         torch.nn.init.constant_(self.norm_out.proj.bias, 0)
         torch.nn.init.constant_(self.output.weight, 0)
