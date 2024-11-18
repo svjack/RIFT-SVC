@@ -111,6 +111,14 @@ class DiT(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=init_std)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Conv1d):
+            # weight shape: (out_channels, in_channels/groups, kernel_size)
+            fan_out = module.weight.shape[0]  # out_channels
+            fan_in = module.weight.shape[1] * module.weight.shape[2]  # (in_channels/groups) * kernel_size
+            init_std = (self.init_std / math.sqrt(fan_in)) * min(1, math.sqrt(fan_out / fan_in))
+            torch.nn.init.normal_(module.weight, mean=0.0, std=init_std)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=self.init_std/math.sqrt(self.dim))
 

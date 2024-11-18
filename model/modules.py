@@ -151,12 +151,18 @@ class MLP(nn.Module):
         inner_dim = int(dim * mult)
         dim_out = dim_out if dim_out is not None else dim
 
+        self.dwconv = nn.Conv1d(dim, dim, kernel_size=7, padding=3, groups=dim)
+        self.norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.activation = ReLU2()
         self.dropout = nn.Dropout(dropout)
         self.mlp_proj = nn.Linear(dim, inner_dim)
         self.mlp_out = nn.Linear(inner_dim, dim_out)
 
     def forward(self, x):
+        x = x.permute(0, 2, 1)
+        x = self.dwconv(x)
+        x = x.permute(0, 2, 1)
+        x = self.norm(x)
         x = self.mlp_proj(x)
         x = self.activation(x)
         x = self.dropout(x)
