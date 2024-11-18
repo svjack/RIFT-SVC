@@ -1,3 +1,4 @@
+import os
 import time
 
 import hydra
@@ -123,7 +124,7 @@ def main(cfg: DictConfig):
     )
 
     checkpoint_callback = ModelCheckpoint(
-        dirpath=cfg.training.checkpoint_path,
+        dirpath=os.path.join('ckpts', cfg.training.wandb_run_name),
         filename='model-{step}',
         save_top_k=-1,
         save_last='link',
