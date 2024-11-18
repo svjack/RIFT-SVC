@@ -11,6 +11,7 @@ from model.modules import (
     TimestepEmbedding,
     DiTBlock,
     AdaLayerNormZero_Final,
+    MLP
 )
 
 
@@ -24,6 +25,7 @@ class CondEmbedding(nn.Module):
         self.f0_embed = nn.Linear(1, cond_dim)
         self.rms_embed = nn.Linear(1, cond_dim)
         self.cvec_embed = nn.Linear(cvec_dim, cond_dim)
+        self.mlp = MLP(cond_dim, cond_dim, mult = 2)
 
     def forward(
             self,
@@ -37,7 +39,7 @@ class CondEmbedding(nn.Module):
             rms = rms.unsqueeze(-1)
 
         cond = self.f0_embed(f0 / 1200) + self.rms_embed(rms) + self.cvec_embed(cvec)
-
+        cond = self.mlp(cond) + cond
         return cond
 
 
@@ -48,11 +50,13 @@ class InputEmbedding(nn.Module):
         super().__init__()
         self.mel_embed = nn.Linear(mel_dim, out_dim)
         self.proj = nn.Linear(2 * out_dim, out_dim)
+        self.mlp = MLP(out_dim, out_dim, mult = 2)
 
     def forward(self, x: Float[torch.Tensor, "b n d1"], cond_embed: Float[torch.Tensor, "b n d2"]):
         x = self.mel_embed(x)
         x = torch.cat((x, cond_embed), dim = -1)
         x = self.proj(x)
+        x = self.mlp(x) + x
         return x
 
 
@@ -88,7 +92,7 @@ class DiT(nn.Module):
                 for _ in range(depth)
             ]
         )
-        
+
         self.norm_out = AdaLayerNormZero_Final(dim)  # final modulation
         self.output = nn.Linear(dim, mel_dim)
 
