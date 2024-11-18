@@ -10,15 +10,16 @@ import click
 @click.command()
 @click.option('--dim', type=int, default=768, help='Transformer dimension')
 @click.option('--depth', type=int, default=12, help='Transformer depth')
+@click.option('--ff_mult', type=int, default=4, help='Feedforward multiplier')
 @click.option('--n_mel_channels', type=int, default=128, help='Number of mel channels')
 @click.option('--frame_len', type=int, default=1024, help='Frame length')
-def main(dim, depth, n_mel_channels, frame_len):
+def main(dim, depth, ff_mult, n_mel_channels, frame_len):
     cvec_dim = 768
     transformer = DiT(
         dim=dim,
         depth=depth,
         head_dim=64,
-        ff_mult=4,
+        ff_mult=ff_mult,
         cvec_dim=cvec_dim
     )
 
