@@ -49,7 +49,7 @@ from model.modules import get_mel_spectrogram
 @click.option(
     '--hop-length',
     type=int,
-    default=256,
+    default=512,
     show_default=True,
     help='Hop length for Mel spectrogram.'
 )
@@ -157,6 +157,12 @@ def generate_mel_specs(meta_info, data_dir, hop_length, n_mel_channels, sample_r
                 hop_size=hop_length,
                 num_mels=n_mel_channels,
                 sampling_rate=sample_rate,
+                ## nsf-hifigan config
+                n_fft=2048,
+                win_size=2048,
+                fmin=40,
+                fmax=16000,
+                ##
             )
             mel = mel.cpu()  # Move to CPU for saving
 

@@ -29,13 +29,13 @@ hann_window_cache = {}
 
 def get_mel_spectrogram(
     y: Float[torch.Tensor, "n"],
-    n_fft: int = 1024,
+    n_fft: int = 2048,
     num_mels: int = 128,
     sampling_rate: int = 44100,
-    hop_size: int = 256,
-    win_size: int = 1024,
-    fmin: int = 0,
-    fmax: int | None = None,
+    hop_size: int = 512,
+    win_size: int = 2048,
+    fmin: int = 40,
+    fmax: int | None = 16000,
     center: bool = False,
 ) -> Float[torch.Tensor, "n_mels mel_len"]:
     """

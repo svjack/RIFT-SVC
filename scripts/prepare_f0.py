@@ -71,7 +71,7 @@ def post_process_f0(f0, sample_rate, hop_length, n_frames, silence_front=0.0):
     # Pad the silence_front if needed
     f0 = np.pad(f0, (start_frame, 0), mode='constant')
 
-    return f0[:-1]
+    return f0
 
 def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, queue, verbose, device_id=0):
     """
@@ -182,7 +182,7 @@ def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, 
 @click.option(
     '--hop-length',
     type=int,
-    default=256,
+    default=512,
     show_default=True,
     help='Hop length for f0 extraction.'
 )

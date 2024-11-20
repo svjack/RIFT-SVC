@@ -29,7 +29,7 @@ import numpy as np
 
 
 class RMSExtractor(nn.Module):
-    def __init__(self, hop_length=256, window_length=1024):
+    def __init__(self, hop_length=512, window_length=2048):
         """
         Initializes the RMSExtractor with the specified hop_length.
 
@@ -87,7 +87,7 @@ class RMSExtractor(nn.Module):
 @click.option(
     '--hop-length',
     type=int,
-    default=256,
+    default=512,
     show_default=True,
     help='Hop length for RMS extraction.'
 )
