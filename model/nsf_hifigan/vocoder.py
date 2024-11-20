@@ -71,7 +71,7 @@ class Vocoder:
         audio = self.vocoder(mel, f0)
         return audio
         
-        
+
 class NsfHifiGAN(torch.nn.Module):
     def __init__(self, model_path, device=None):
         super().__init__()
@@ -103,13 +103,12 @@ class NsfHifiGAN(torch.nn.Module):
         mel = self.stft.get_mel(audio, keyshift=keyshift).transpose(1, 2) # B, n_frames, bins
         return mel
     
-    def forward(self, mel: Float[torch.Tensor, "batch n_frames bins"], f0: Float[torch.Tensor, "batch n_frames"]):
+    def forward(self, mel: Float[torch.Tensor, "batch bins n_frames"], f0: Float[torch.Tensor, "batch n_frames"]):
         if self.model is None:
             print('| Load HifiGAN: ', self.model_path)
             self.model, self.h = load_model(self.model_path, device=self.device)
         with torch.no_grad():
-            c = mel.transpose(1, 2)
-            audio = self.model(c, f0)
+            audio = self.model(mel, f0)
             return audio
 
 

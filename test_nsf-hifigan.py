@@ -8,18 +8,22 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from model.nsf_hifigan import Vocoder, STFT
+from model.nsf_hifigan import Vocoder, STFT, NsfHifiGAN
 
 # %%
 
-vocoder = Vocoder('nsf-hifigan', 'pretrained/nsf_hifigan_44.1k_hop512_128bin_2024.02/model.ckpt')
+vocoder = NsfHifiGAN('pretrained/nsf_hifigan_44.1k_hop512_128bin_2024.02/model.ckpt')
 
 # %%
-mel = torch.randn(1, 256, 128).to(vocoder.device)
-f0 = torch.randn(1, 256, 16).to(vocoder.device)
-audio = vocoder.infer(mel, f0)
+f0 = torch.load("data/pretrain/popcs/如果的事-0000_wf0.f0.pt").to(vocoder.device)
+mel = torch.load("data/pretrain/popcs/如果的事-0000_wf0.mel.pt").to(vocoder.device)
+print(f0.shape, mel.shape)
+audio = vocoder(mel, f0[None, :])
 
+# %%
 
+from IPython.display import Audio
+Audio(audio.squeeze().cpu().numpy(), rate=44100)
 # %%
 
 from model.rmvpe import RMVPE
@@ -254,4 +258,19 @@ rms_np = rms(waveform).squeeze().cpu().numpy()
 # %%
 
 rms_np.shape
+# %%
+
+import glob
+
+# %%
+
+glob.glob("data/pretrain/*/*.f0.pt")
+# %%
+import torch
+
+f0 = torch.load("data/pretrain/popcs/如果的事-0000_wf0.f0.pt")
+mel = torch.load("data/pretrain/popcs/如果的事-0000_wf0.mel.pt")
+# %%
+
+f0.shape, mel.shape
 # %%

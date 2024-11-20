@@ -13,6 +13,7 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities import grad_norm
 
 import model.BigVGAN.bigvgan as bigvgan
+from model.nsf_hifigan import NsfHifiGAN
 from model.metrics import mcd, psnr, si_snr, snr
 from model.modules import get_mel_spectrogram
 from model.utils import draw_mel_specs, l2_grad_norm
@@ -66,11 +67,8 @@ class RIFTSVCLightningModule(LightningModule):
             return
 
         if self.vocoder is None:
-            self.vocoder = bigvgan.BigVGAN.from_pretrained(
-                'pretrained/bigvgan_v2_44khz_128band_256x', 
-                use_cuda_kernel=False
-            ).eval().float().to(self.device)
-            self.vocoder.remove_weight_norm()
+            self.vocoder =  NsfHifiGAN(
+                'pretrained/nsf_hifigan_44.1k_hop512_128bin_2024.02/model.ckpt').to(self.device)
         else:
             self.vocoder = self.vocoder.to(self.device)
         
@@ -128,11 +126,13 @@ class RIFTSVCLightningModule(LightningModule):
         mel_gt = mel_gt.float()
 
         for i in range(mel_gen.shape[0]):
-            wav_gen = self.vocoder(mel_gen[i:i+1, :frame_lens[i], :].transpose(1, 2)).squeeze(0)
-            wav_gt = self.vocoder(mel_gt[i:i+1, :frame_lens[i], :].transpose(1, 2)).squeeze(0)
+            wav_gen = self.vocoder(mel_gen[i:i+1, :frame_lens[i], :].transpose(1, 2), f0[i:i+1, :frame_lens[i]])
+            wav_gt = self.vocoder(mel_gt[i:i+1, :frame_lens[i], :].transpose(1, 2), f0[i:i+1, :frame_lens[i]])
+
+            wav_gen = wav_gen.squeeze(0)
+            wav_gt = wav_gt.squeeze(0)
 
             sample_idx = batch_idx * mel_gen.shape[0] + i
-
             mel_gen_i = get_mel_spectrogram(wav_gen).transpose(1, 2)
             mel_gt_i = get_mel_spectrogram(wav_gt).transpose(1, 2)
 
