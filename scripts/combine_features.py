@@ -4,6 +4,8 @@ import sys
 import click
 from tqdm import tqdm
 import torch
+from multiprocessing import Pool, cpu_count
+from functools import partial
 
 @click.command()
 @click.option(
@@ -39,74 +41,87 @@ def combine_features(meta_info, data_dir, verbose):
 
     train_audios = meta.get('train_audios', [])
     test_audios = meta.get('test_audios', [])
-
     all_audios = train_audios + test_audios
-    total_audios = len(all_audios)
 
     if verbose:
-        click.echo(f"Total audios to process: {total_audios}")
+        click.echo(f"Total audios to process: {len(all_audios)}")
 
-    for audio in tqdm(all_audios, desc="Combining Features", unit="audio"):
-        speaker = audio.get('speaker')
-        file_name = audio.get('file_name')
+    # Set up multiprocessing
+    num_processes = cpu_count()
+    process_fn = partial(process_single_audio, data_dir=data_dir, verbose=verbose)
+    
+    with Pool(processes=num_processes) as pool:
+        results = list(tqdm(
+            pool.imap(process_fn, all_audios),
+            total=len(all_audios),
+            desc="Combining Features",
+            unit="audio"
+        ))
 
-        if not speaker or not file_name:
-            if verbose:
-                click.echo(f"Skipping invalid entry: {audio}")
-            continue
-
-        # Construct paths for individual feature files
-        base_path = os.path.join(data_dir, speaker, file_name)
-        mel_path = f"{base_path}.mel.pt"
-        rms_path = f"{base_path}.rms.pt"
-        f0_path = f"{base_path}.f0.pt"
-        cvec_path = f"{base_path}.cvec.pt"
-
-        # Check if all feature files exist
-        missing_files = []
-        for path in [mel_path, rms_path, f0_path, cvec_path]:
-            if not os.path.isfile(path):
-                missing_files.append(path)
-
-        if missing_files:
-            if verbose:
-                click.echo(f"Missing files for {file_name}: {missing_files}")
-            continue
-
-        try:
-            # Load all features
-            mel = torch.load(mel_path, weights_only=True)
-            rms = torch.load(rms_path, weights_only=True)
-            f0 = torch.load(f0_path, weights_only=True)
-            cvec = torch.load(cvec_path, weights_only=True)
-
-            # Combine features into a single dictionary
-            combined_features = {
-                'mel': mel,
-                'rms': rms,
-                'f0': f0,
-                'cvec': cvec,
-            }
-
-            # Save the combined features
-            combined_path = f"{base_path}.combined.pt"
-            torch.save(combined_features, combined_path)
-
-            if verbose:
-                click.echo(f"Combined features saved: {combined_path}")
-
-            # Optionally, remove individual feature files to save space
-            os.remove(mel_path)
-            os.remove(rms_path)
-            os.remove(f0_path)
-            os.remove(cvec_path)
-
-        except Exception as e:
-            click.echo(f"Error combining features for {file_name}: {e}", err=True)
-            continue
-
+    successful = sum(1 for r in results if r)
     if verbose:
-        click.echo("Feature combination complete.")
+        click.echo(f"Feature combination complete. Successfully processed {successful}/{len(all_audios)} files.")
+
+def process_single_audio(audio, data_dir, verbose):
+    """Helper function to process a single audio file"""
+    speaker = audio.get('speaker')
+    file_name = audio.get('file_name')
+
+    if not speaker or not file_name:
+        if verbose:
+            click.echo(f"Skipping invalid entry: {audio}")
+        return False
+
+    # Construct paths for individual feature files
+    base_path = os.path.join(data_dir, speaker, file_name)
+    mel_path = f"{base_path}.mel.pt"
+    rms_path = f"{base_path}.rms.pt"
+    f0_path = f"{base_path}.f0.pt"
+    cvec_path = f"{base_path}.cvec.pt"
+
+    # Check if all feature files exist
+    missing_files = []
+    for path in [mel_path, rms_path, f0_path, cvec_path]:
+        if not os.path.isfile(path):
+            missing_files.append(path)
+
+    if missing_files:
+        if verbose:
+            click.echo(f"Missing files for {file_name}: {missing_files}")
+        return False
+
+    try:
+        # Load all features
+        mel = torch.load(mel_path, weights_only=True)
+        rms = torch.load(rms_path, weights_only=True)
+        f0 = torch.load(f0_path, weights_only=True)
+        cvec = torch.load(cvec_path, weights_only=True)
+
+        # Combine features into a single dictionary
+        combined_features = {
+            'mel': mel,
+            'rms': rms,
+            'f0': f0,
+            'cvec': cvec,
+        }
+
+        # Save the combined features
+        combined_path = f"{base_path}.combined.pt"
+        torch.save(combined_features, combined_path)
+
+        if verbose:
+            click.echo(f"Combined features saved: {combined_path}")
+
+        # Remove individual feature files
+        os.remove(mel_path)
+        os.remove(rms_path)
+        os.remove(f0_path)
+        os.remove(cvec_path)
+        return True
+
+    except Exception as e:
+        click.echo(f"Error combining features for {file_name}: {e}", err=True)
+        return False
 
 if __name__ == "__main__":
     combine_features()
