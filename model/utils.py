@@ -44,7 +44,12 @@ def draw_mel_specs(gt: np.ndarray, gen: np.ndarray, diff: np.ndarray, cache_path
     ax2.set_ylabel('Gen', fontsize=14)
     ax2.set_xticks([])
     
-    im3 = ax3.imshow(diff, origin='lower', aspect='auto')
+    # Find symmetric limits for difference plot
+    diff_abs_max = max(abs(diff.min()), abs(diff.max()))
+    
+    im3 = ax3.imshow(diff, origin='lower', aspect='auto',
+                     cmap='RdBu_r',  # Red-White-Blue colormap (reversed)
+                     vmin=-diff_abs_max, vmax=diff_abs_max)
     ax3.set_ylabel('Diff', fontsize=14)
     
     fig.colorbar(im1, ax=[ax1, ax2], location='right', label='Magnitude')
