@@ -90,11 +90,27 @@ def perform_stratified_split(speaker_to_files, num_test_per_speaker, seed):
     Returns:
         tuple: (train_audios, test_audios)
     """
+    excluded_speakers = [
+        "gtsinger-DE",
+        "gtsinger-ES",
+        "gtsinger-FR",
+        "gtsinger-IT",
+        "gtsinger-KO",
+        "gtsinger-RU"
+    ]
+
     random.seed(seed)
     train_audios = []
     test_audios = []
 
     for speaker, files in speaker_to_files.items():
+        # Check if any excluded speaker substring is in the current speaker ID
+        if any(excluded in speaker for excluded in excluded_speakers):
+            # Assign all files to training set
+            for file in files:
+                train_audios.append({"speaker": speaker, "file_name": file})
+            continue  # Skip to the next speaker
+
         if len(files) < num_test_per_speaker:
             click.echo(
                 f"Warning: Speaker '{speaker}' has only {len(files)} files, less than the requested {num_test_per_speaker} testing samples.",
