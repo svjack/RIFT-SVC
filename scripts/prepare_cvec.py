@@ -10,18 +10,19 @@ Usage:
     python generate_contentvec.py --meta-info META_INFO_JSON --data-dir DATA_DIR --model-path MODEL_PATH [OPTIONS]
 
 Options:
-    --meta-info FILE_PATH        Path to the meta_info.json file. (Required)
-    --data-dir DIRECTORY         Path to the root of the preprocessed dataset directory. (Required)
-    --model-path FILE_PATH       Path to the pre-trained HuBERT-like model file. (Required)
-    --sample-rate INTEGER        Sample rate of the audio files in Hz. (Default: 16000)
-    --verbose                    Enable verbose output.
+    --meta-info FILE_PATH           Path to the meta_info.json file. (Required)
+    --data-dir DIRECTORY            Path to the root of the preprocessed dataset directory. (Required)
+    --model-path FILE_PATH          Path to the pre-trained HuBERT-like model file. (Required)
+    --sample-rate INTEGER           Sample rate of the audio files in Hz. (Default: 16000)
+    --num-workers-per-device INTEGER  Number of workers per device for multiprocessing. (Default: 2)
+    --verbose                       Enable verbose output.
 """
 
 import json
 import os
 import sys
 from pathlib import Path
-from multiprocessing import Process, Queue, current_process
+from multiprocessing import Process, Queue, current_process, cpu_count
 import multiprocessing
 from torch import multiprocessing as mp
 
@@ -125,6 +126,7 @@ def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbo
     # Notify completion of this process
     queue.put(f"Process {current_process().name} completed.")
 
+
 @click.command()
 @click.option(
     '--meta-info',
@@ -153,19 +155,22 @@ def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbo
     help='Sample rate of the audio files in Hz.'
 )
 @click.option(
+    '--num-workers-per-device',
+    type=int,
+    default=1,
+    show_default=True,
+    help='Number of workers per device for multiprocessing.'
+)
+@click.option(
     '--verbose',
     is_flag=True,
     default=False,
     help='Enable verbose output.'
 )
-def generate_contentvec(meta_info, data_dir, model_path, sample_rate, verbose):
+def generate_contentvec(meta_info, data_dir, model_path, sample_rate, num_workers_per_device, verbose):
     """
     Generate content vectors for each audio file specified in the meta_info.json and save them as .contentvec.pt files.
     """
-    # Move the start method setting here as a fallback
-    if mp.get_start_method(allow_none=True) != 'spawn':
-        mp.set_start_method('spawn', force=True)
-        
     # Load meta_info.json
     try:
         with open(meta_info, 'r', encoding='utf-8') as f:
@@ -202,20 +207,39 @@ def generate_contentvec(meta_info, data_dir, model_path, sample_rate, verbose):
     else:
         click.echo("No CUDA devices available. Using CPU.")
 
-    # Split audios among devices
-    num_processes = len(devices) if devices else 1
+    # Determine total number of workers
+    if devices:
+        total_workers = num_devices * num_workers_per_device
+        workers_per_device = num_workers_per_device
+    else:
+        total_workers = num_workers_per_device
+        workers_per_device = 1  # CPU workers
 
-    split_audios = [[] for _ in range(num_processes)]
+    # Adjust number of workers if it exceeds CPU count
+    available_cpus = cpu_count()
+    if total_workers > available_cpus:
+        click.echo(f"Adjusting total workers from {total_workers} to {available_cpus} due to CPU count limitations.")
+        total_workers = available_cpus
+        workers_per_device = max(1, available_cpus // num_devices) if devices else available_cpus
+
+    if verbose:
+        click.echo(f"Total workers: {total_workers} (Workers per device: {workers_per_device})")
+
+    # Split audios among workers
+    split_audios = [[] for _ in range(total_workers)]
     for i, audio in enumerate(all_audios):
-        split_audios[i % num_processes].append(audio)
+        split_audios[i % total_workers].append(audio)
 
     # Create a multiprocessing Queue for communication
     queue = Queue()
 
     # Create and start processes
     processes = []
-    for i in range(num_processes):
-        device_id = devices[i] if devices else None
+    for i in range(total_workers):
+        if devices:
+            device = devices[i % num_devices]
+        else:
+            device = None
         p = Process(
             target=worker_process,
             args=(
@@ -225,7 +249,7 @@ def generate_contentvec(meta_info, data_dir, model_path, sample_rate, verbose):
                 sample_rate,
                 queue,
                 verbose,
-                device_id
+                device
             ),
             name=f"Process-{i}"
         )
@@ -235,7 +259,7 @@ def generate_contentvec(meta_info, data_dir, model_path, sample_rate, verbose):
     # Initialize tqdm progress bar
     with tqdm(total=len(all_audios), desc="Extracting Content Vectors", unit="file") as pbar:
         completed_processes = 0
-        while completed_processes < num_processes:
+        while completed_processes < total_workers:
             message = queue.get()
             if message == "PROGRESS":
                 pbar.update(1)
@@ -250,6 +274,7 @@ def generate_contentvec(meta_info, data_dir, model_path, sample_rate, verbose):
                 if verbose:
                     pbar.write(message)
             else:
+                # Handle other messages if necessary
                 if verbose:
                     pbar.write(message)
 
@@ -258,6 +283,7 @@ def generate_contentvec(meta_info, data_dir, model_path, sample_rate, verbose):
         p.join()
 
     click.echo("Content vector extraction complete.")
+
 
 if __name__ == "__main__":
     # Set start method to spawn
