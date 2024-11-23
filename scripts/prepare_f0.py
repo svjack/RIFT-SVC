@@ -32,47 +32,9 @@ from tqdm import tqdm
 import numpy as np
 from multiprocessing import Process, Queue, current_process, cpu_count
 
-from model.rmvpe.inference import RMVPE
+from rift_svc.rmvpe.inference import RMVPE
+from rift_svc.utils import post_process_f0
 
-def post_process_f0(f0, sample_rate, hop_length, n_frames, silence_front=0.0):
-    """
-    Post-process the extracted f0 to align with Mel spectrogram frames.
-
-    Args:
-        f0 (numpy.ndarray): Extracted f0 array.
-        sample_rate (int): Sample rate of the audio.
-        hop_length (int): Hop length used during processing.
-        n_frames (int): Total number of frames (for alignment).
-        silence_front (float): Seconds of silence to remove from the front.
-
-    Returns:
-        numpy.ndarray: Processed f0 array aligned with Mel spectrogram frames.
-    """
-    # Calculate number of frames to skip based on silence_front
-    start_frame = int(silence_front * sample_rate / hop_length)
-    real_silence_front = start_frame * hop_length / sample_rate
-    # Assuming silence_front has been handled during RMVPE inference if needed
-
-    # Handle unvoiced frames by interpolation
-    uv = f0 == 0
-    if np.any(~uv):
-        f0_interp = np.interp(np.where(uv)[0], np.where(~uv)[0], f0[~uv])
-        f0[uv] = f0_interp
-    else:
-        # If no voiced frames, set all to zero
-        f0 = np.zeros_like(f0)
-
-    # Align with hop_length frames
-    origin_time = 0.01 * np.arange(len(f0))  # Placeholder: Adjust based on RMVPE's timing
-    target_time = hop_length / sample_rate * np.arange(n_frames - start_frame)
-    f0 = np.interp(target_time, origin_time, f0)
-    uv = np.interp(target_time, origin_time, uv.astype(float)) > 0.5
-    f0[uv] = 0
-
-    # Pad the silence_front if needed
-    f0 = np.pad(f0, (start_frame, 0), mode='constant')
-
-    return f0[:-1]
 
 def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, queue, verbose, device_id=0):
     """

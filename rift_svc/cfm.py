@@ -10,7 +10,7 @@ from torchdiffeq import odeint
 
 from einops import rearrange
 
-from model.utils import (
+from rift_svc.utils import (
     exists, 
     lens_to_mask,
 ) 

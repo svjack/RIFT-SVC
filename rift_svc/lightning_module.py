@@ -12,11 +12,11 @@ from PIL import Image
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities import grad_norm
 
-import model.BigVGAN.bigvgan as bigvgan
-from model.nsf_hifigan import NsfHifiGAN
-from model.metrics import mcd, psnr, si_snr, snr
-from model.modules import get_mel_spectrogram
-from model.utils import draw_mel_specs, l2_grad_norm
+import rift_svc.BigVGAN.bigvgan as bigvgan
+from rift_svc.nsf_hifigan import NsfHifiGAN
+from rift_svc.metrics import mcd, psnr, si_snr, snr
+from rift_svc.modules import get_mel_spectrogram
+from rift_svc.utils import draw_mel_specs, l2_grad_norm
 
 
 class RIFTSVCLightningModule(LightningModule):

@@ -6,6 +6,7 @@ from librosa.filters import mel as librosa_mel_fn
 import torch
 from torch import nn
 import torch.nn.functional as F
+from transformers import HubertModel
 from x_transformers.x_transformers import apply_rotary_pos_emb
 
 
@@ -97,6 +98,56 @@ def get_mel_spectrogram(
     mel_spec = spectral_normalize_torch(mel_spec)
 
     return mel_spec
+
+
+class RMSExtractor(nn.Module):
+    def __init__(self, hop_length=512, window_length=2048):
+        """
+        Initializes the RMSExtractor with the specified hop_length.
+
+        Args:
+            hop_length (int): Number of samples between successive frames.
+        """
+        super(RMSExtractor, self).__init__()
+        self.hop_length = hop_length
+        self.window_length = window_length
+
+    def forward(self, inp):
+        """
+        Extracts RMS energy from the input audio tensor.
+
+        Args:
+            inp (Tensor): Audio tensor of shape (batch, samples).
+
+        Returns:
+            Tensor: RMS energy tensor of shape (batch, frames).
+        """
+        # Square the audio signal
+        audio_squared = inp ** 2
+
+        # Use the same padding as mel spectrogram
+        padding = (self.window_length - self.hop_length) // 2
+        audio_padded = torch.nn.functional.pad(
+            audio_squared, (padding, padding), mode='reflect'
+        )
+
+        # Unfold to create frames with window_length instead of hop_length
+        frames = audio_padded.unfold(1, self.window_length, self.hop_length)  # Shape: (batch, frames, window_length)
+
+        # Compute mean energy per frame
+        mean_energy = frames.mean(dim=-1)  # Shape: (batch, frames)
+
+        # Compute RMS by taking square root
+        rms = torch.sqrt(mean_energy)  # Shape: (batch, frames)
+
+        return rms
+
+
+
+class HubertModelWithFinalProj(HubertModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.final_proj = nn.Linear(config.hidden_size, config.classifier_proj_size)
 
 
 # AdaLayerNormZero

@@ -21,6 +21,8 @@ Options:
 import json
 import os
 import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from pathlib import Path
 from multiprocessing import Process, Queue, current_process, cpu_count
 import multiprocessing
@@ -33,15 +35,7 @@ import click
 from tqdm import tqdm
 import numpy as np
 
-# Import the HuBERT-like model
-# Adjust the import based on your project structure
-from transformers import HubertModel
 
-# Define the model class, including any necessary modifications
-class HubertModelWithFinalProj(HubertModel):
-    def __init__(self, config):
-        super().__init__(config)
-        self.final_proj = nn.Linear(config.hidden_size, config.classifier_proj_size)
 
 
 def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbose, device_id=None):

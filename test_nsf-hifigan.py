@@ -8,7 +8,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from model.nsf_hifigan import Vocoder, STFT, NsfHifiGAN
+from rift_svc.nsf_hifigan import Vocoder, STFT, NsfHifiGAN
 
 # %%
 
@@ -26,7 +26,7 @@ from IPython.display import Audio
 Audio(audio.squeeze().cpu().numpy(), rate=44100)
 # %%
 
-from model.rmvpe import RMVPE
+from rift_svc.rmvpe import RMVPE
 
 rmvpe = RMVPE(model_path="pretrained/rmvpe/model.pt", hop_length=160, device=vocoder.device)
 
@@ -151,7 +151,7 @@ plt.savefig('mel_f0.png')
 
 # %%
 
-from model.modules import get_mel_spectrogram
+from rift_svc.modules import get_mel_spectrogram
 
 mel2 = get_mel_spectrogram(
     waveform,

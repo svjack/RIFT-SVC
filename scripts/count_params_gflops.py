@@ -1,7 +1,7 @@
 import sys, os
-sys.path.append(os.getcwd())
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model import CFM, DiT
+from rift_svc import CFM, DiT
 import torch
 import thop
 import click

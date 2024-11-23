@@ -7,7 +7,7 @@ from einops import repeat
 from jaxtyping import Float, Int, Bool
 from x_transformers.x_transformers import RotaryEmbedding
 
-from model.modules import (
+from rift_svc.modules import (
     TimestepEmbedding,
     DiTBlock,
     AdaLayerNormZero_Final,

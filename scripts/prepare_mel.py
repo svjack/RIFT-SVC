@@ -28,7 +28,7 @@ from tqdm import tqdm
 from multiprocessing import Pool, cpu_count, Manager
 from functools import partial
 
-from model.modules import get_mel_spectrogram
+from rift_svc.modules import get_mel_spectrogram
 
 
 def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verbose):

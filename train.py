@@ -9,9 +9,9 @@ from pytorch_lightning.loggers import WandbLogger
 from schedulefree import AdamWScheduleFree
 from torch.utils.data import DataLoader
 
-from model import CFM, DiT
-from model.dataset import collate_fn, load_svc_dataset
-from model.lightning_module import RIFTSVCLightningModule
+from rift_svc import CFM, DiT
+from rift_svc.dataset import collate_fn, load_svc_dataset
+from rift_svc.lightning_module import RIFTSVCLightningModule
 
 
 class CustomProgressBar(TQDMProgressBar):
