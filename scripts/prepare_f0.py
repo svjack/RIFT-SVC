@@ -16,6 +16,7 @@ Options:
     --model-path FILE_PATH       Path to the pre-trained RMVPE model file. (Required)
     --hop-length INTEGER         Hop length for f0 extraction. (Default: 256)
     --sample-rate INTEGER        Target sample rate in Hz. (Default: 22050)
+    --num-workers-per-device INTEGER  Number of workers per device for multiprocessing. (Default: 2)
     --verbose                    Enable verbose output.
 """
 
@@ -71,7 +72,7 @@ def post_process_f0(f0, sample_rate, hop_length, n_frames, silence_front=0.0):
     # Pad the silence_front if needed
     f0 = np.pad(f0, (start_frame, 0), mode='constant')
 
-    return f0
+    return f0[:-1]
 
 def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, queue, verbose, device_id=0):
     """
@@ -85,6 +86,7 @@ def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, 
         sample_rate (int): Sample rate of the audio files in Hz.
         queue (Queue): Multiprocessing queue to communicate progress.
         verbose (bool): If True, enable verbose output.
+        device_id (int): CUDA device ID.
     """
     device = torch.device(f'cuda:{device_id}' if torch.cuda.is_available() else 'cpu')
     try:
@@ -194,12 +196,19 @@ def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, 
     help='Sample rate of the audio files in Hz.'
 )
 @click.option(
+    '--num-workers-per-device',
+    type=int,
+    default=1,
+    show_default=True,
+    help='Number of workers per device for multiprocessing.'
+)
+@click.option(
     '--verbose',
     is_flag=True,
     default=False,
     help='Enable verbose output.'
 )
-def generate_f0(meta_info, data_dir, model_path, hop_length, sample_rate, verbose):
+def generate_f0(meta_info, data_dir, model_path, hop_length, sample_rate, num_workers_per_device, verbose):
     """
     Generate f0 for each audio file specified in the meta_info.json and save them as .f0.pt files.
     """
@@ -239,22 +248,38 @@ def generate_f0(meta_info, data_dir, model_path, hop_length, sample_rate, verbos
     else:
         click.echo("No CUDA devices available. Using CPU.")
 
-    # Split audios among devices
-    num_processes = len(devices) if devices else 1
-    if num_processes > cpu_count():
-        num_processes = cpu_count()
+    # Determine total number of workers
+    if devices:
+        total_workers = num_devices * num_workers_per_device
+        workers_per_device = num_workers_per_device
+    else:
+        total_workers = num_workers_per_device
+        workers_per_device = 1  # CPU workers
 
-    split_audios = [[] for _ in range(num_processes)]
+    # Adjust number of workers if it exceeds CPU count
+    if total_workers > cpu_count():
+        click.echo(f"Adjusting total workers from {total_workers} to {cpu_count()} due to CPU count limitations.")
+        total_workers = cpu_count()
+        workers_per_device = max(1, cpu_count() // num_devices) if devices else cpu_count()
+
+    if verbose:
+        click.echo(f"Total workers: {total_workers} (Workers per device: {workers_per_device})")
+
+    # Split audios among workers
+    split_audios = [[] for _ in range(total_workers)]
     for i, audio in enumerate(all_audios):
-        split_audios[i % num_processes].append(audio)
+        split_audios[i % total_workers].append(audio)
 
     # Create a multiprocessing Queue for communication
     queue = Queue()
 
     # Create and start processes
     processes = []
-    for i in range(num_processes):
-        device = devices[i] if devices else None
+    for i in range(total_workers):
+        if devices:
+            device = devices[i % num_devices]
+        else:
+            device = None
         p = Process(
             target=worker_process,
             args=(
@@ -275,7 +300,7 @@ def generate_f0(meta_info, data_dir, model_path, hop_length, sample_rate, verbos
     # Initialize tqdm progress bar
     with tqdm(total=len(all_audios), desc="Extracting f0", unit="file") as pbar:
         completed_processes = 0
-        while completed_processes < num_processes:
+        while completed_processes < total_workers:
             message = queue.get()
             if message == "PROGRESS":
                 pbar.update(1)
