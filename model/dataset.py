@@ -68,7 +68,18 @@ class SVCDataset(Dataset):
 
         if frame_len > self.max_frame_len:
             if self.split == "train": 
-                start = random.randint(0, frame_len - self.max_frame_len)
+                # Keep trying until we find a good segment or hit max attempts
+                max_attempts = 10
+                attempt = 0
+                while attempt < max_attempts:
+                    start = random.randint(0, frame_len - self.max_frame_len)
+                    end = start + self.max_frame_len
+                    f0_segment = f0[start:end]
+                    # Check if more than 90% of f0 values are 0
+                    zero_ratio = (f0_segment == 0).float().mean().item()
+                    if zero_ratio < 0.9:  # Found a good segment
+                        break
+                    attempt += 1
             else:
                 start = 0
             end = start + self.max_frame_len
