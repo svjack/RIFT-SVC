@@ -65,7 +65,7 @@ class InputEmbedding(nn.Module):
 
 class DiT(nn.Module):
     def __init__(self,
-                 dim: int, depth: int, head_dim: int, dropout: float = 0.1, ff_mult: int = 4,
+                 dim: int, depth: int, head_dim: int = 64, dropout: float = 0.1, ff_mult: int = 4,
                  mel_dim: int = 128, num_speaker: int = 1, cvec_dim: int = 768, init_std: float = 1):
         super().__init__()
 
