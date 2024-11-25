@@ -64,7 +64,7 @@ class CFM(nn.Module):
         rms: torch.Tensor,           # [b n]
         cvec: torch.Tensor,          # [b n d]
         *,
-        frame_lens: torch.Tensor,    # Merged from duration and lens
+        frame_lens: torch.Tensor | None = None,    # Merged from duration and lens
         steps: int = 32,
         cfg_strength: float = 2.,
         sway_sampling_coef: float | None = None,
@@ -75,6 +75,9 @@ class CFM(nn.Module):
         self.eval()
 
         batch, mel_seq_len, device = *src_mel.shape[:2], src_mel.device
+
+        if not exists(frame_lens):
+            frame_lens = torch.full((batch,), mel_seq_len, device=device)
 
         mask = lens_to_mask(frame_lens)
 
