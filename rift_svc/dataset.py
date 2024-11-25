@@ -7,19 +7,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
 
-
-def interpolate_tensor(tensor, new_size):
-    # Add two dummy dimensions to make it [1, 1, n, d]
-    tensor = tensor.unsqueeze(0).unsqueeze(0)
-    
-    # Interpolate
-    interpolated = F.interpolate(tensor, size=(new_size, tensor.shape[-1]), mode='nearest')
-    
-    # Remove the dummy dimensions
-    interpolated = interpolated.squeeze(0).squeeze(0)
-    
-    return interpolated
-
+from rift_svc.utils import interpolate_tensor
 
 class SVCDataset(Dataset):
     def __init__(
