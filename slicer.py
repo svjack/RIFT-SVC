@@ -72,7 +72,7 @@ class Slicer:
         else:
             samples = waveform
         if (samples.shape[0] + self.hop_size - 1) // self.hop_size <= self.min_length:
-            return [waveform]
+            return [(0, waveform)]
         rms_list = get_rms(y=samples, frame_length=self.win_size, hop_length=self.hop_size).squeeze(0)
         sil_tags = []
         silence_start = None
@@ -129,16 +129,28 @@ class Slicer:
             sil_tags.append((pos, total_frames + 1))
         # Apply and return slices.
         if len(sil_tags) == 0:
-            return [waveform]
+            return [(0, waveform)]
         else:
-            chunks = []
+            chunks_with_pos = []
             if sil_tags[0][0] > 0:
-                chunks.append(self._apply_slice(waveform, 0, sil_tags[0][0]))
+                start_pos = 0
+                chunks_with_pos.append((
+                    start_pos,
+                    self._apply_slice(waveform, 0, sil_tags[0][0])
+                ))
             for i in range(len(sil_tags) - 1):
-                chunks.append(self._apply_slice(waveform, sil_tags[i][1], sil_tags[i + 1][0]))
+                start_pos = sil_tags[i][1] * self.hop_size
+                chunks_with_pos.append((
+                    start_pos,
+                    self._apply_slice(waveform, sil_tags[i][1], sil_tags[i + 1][0])
+                ))
             if sil_tags[-1][1] < total_frames:
-                chunks.append(self._apply_slice(waveform, sil_tags[-1][1], total_frames))
-            return chunks
+                start_pos = sil_tags[-1][1] * self.hop_size
+                chunks_with_pos.append((
+                    start_pos,
+                    self._apply_slice(waveform, sil_tags[-1][1], total_frames)
+                ))
+            return chunks_with_pos
 
 
 def main():
@@ -174,13 +186,21 @@ def main():
         hop_size=args.hop_size,
         max_sil_kept=args.max_sil_kept
     )
-    chunks = slicer.slice(audio)
+    chunks_with_pos = slicer.slice(audio)
     if not os.path.exists(out):
         os.makedirs(out)
-    for i, chunk in enumerate(chunks):
+    for i, (pos, chunk) in enumerate(chunks_with_pos):
         if len(chunk.shape) > 1:
             chunk = chunk.T
-        soundfile.write(os.path.join(out, f'%s_%d.wav' % (os.path.basename(args.audio).rsplit('.', maxsplit=1)[0], i)), chunk, sr)
+        soundfile.write(
+            os.path.join(out, f'%s_%d_pos_%d.wav' % (
+                os.path.basename(args.audio).rsplit('.', maxsplit=1)[0], 
+                i,
+                pos
+            )), 
+            chunk, 
+            sr
+        )
 
 
 if __name__ == '__main__':
