@@ -1,7 +1,7 @@
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from rift_svc import CFM, DiT
+from rift_svc import RF, DiT
 import torch
 import thop
 import click
@@ -23,7 +23,7 @@ def main(dim, depth, ff_mult, n_mel_channels, frame_len):
         cvec_dim=cvec_dim
     )
 
-    model = CFM(transformer=transformer)
+    model = RF(transformer=transformer)
 
     flops, params = thop.profile(
         model,

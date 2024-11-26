@@ -10,7 +10,7 @@ from rift_svc.nsf_hifigan import NsfHifiGAN
 from rift_svc.rmvpe import RMVPE
 from rift_svc.modules import get_mel_spectrogram, RMSExtractor, HubertModelWithFinalProj
 from rift_svc.utils import post_process_f0, interpolate_tensor
-from rift_svc import CFM, DiT
+from rift_svc import RF, DiT
 
 from slicer import Slicer  # Importing the updated Slicer
 
@@ -42,8 +42,24 @@ def extract_state_dict(ckpt):
 @click.option('--sample-rate', type=int, default=44100, help='Sample rate')
 @click.option('--infer-steps', type=int, default=32, help='Number of inference steps')
 @click.option('--cfg-strength', type=float, default=2.0, help='Classifier-free guidance strength')
-@click.option('--target_loudness', type=float, default=-18.0, help='Target loudness in LUFS for normalization')
-def main(model, input, output, speaker_id, key, device, hop_length, sample_rate, infer_steps, cfg_strength, target_loudness):
+@click.option('--target-loudness', type=float, default=-18.0, help='Target loudness in LUFS for normalization')
+@click.option('--interpolate-src', type=float, default=0.0, help='Interpolate source audio')
+def main(
+    model,
+    input,
+    output,
+    speaker_id,
+    key,
+    device,
+    hop_length,
+    window_size,
+    overlap_size,
+    sample_rate,
+    infer_steps,
+    cfg_strength,
+    target_loudness,
+    interpolate_src
+):
     """Convert the voice in an audio file to a target speaker."""
 
     # Setup device
@@ -63,7 +79,7 @@ def main(model, input, output, speaker_id, key, device, hop_length, sample_rate,
     state_dict, num_speakers = extract_state_dict(ckpt)
 
     transformer = DiT(dim=768, depth=12, num_speaker=num_speakers)
-    model = CFM(transformer=transformer)
+    model = RF(transformer=transformer)
     model.load_state_dict(state_dict)
     model = model.to(device)
     model.eval()
@@ -112,10 +128,10 @@ def main(model, input, output, speaker_id, key, device, hop_length, sample_rate,
 
             # --- Loudness Normalization Start ---
             # Measure the loudness of the segment
-            loudness = meter.integrated_loudness(chunk)
+            original_loudness = meter.integrated_loudness(chunk)
 
             # Normalize the segment to the target loudness
-            loudness_normalized_audio = pyln.normalize.loudness(chunk, loudness, target_loudness)
+            loudness_normalized_audio = pyln.normalize.loudness(chunk, original_loudness, target_loudness)
 
             # Handle clipping by scaling audio if necessary
             max_amp = np.max(np.abs(loudness_normalized_audio))
@@ -159,8 +175,6 @@ def main(model, input, output, speaker_id, key, device, hop_length, sample_rate,
 
             # Step (2 continued): Infer mel using overlapping sliding window
             # Define sliding window parameters
-            window_size = 256
-            overlap_size = 32
             step_size = window_size - overlap_size
             total_frames = mel.shape[1]
             inferred_mel = torch.zeros_like(mel)
@@ -184,7 +198,9 @@ def main(model, input, output, speaker_id, key, device, hop_length, sample_rate,
                     rms=rms_window,
                     cvec=cvec_window,
                     steps=infer_steps,
-                    cfg_strength=cfg_strength
+                    cfg_strength=cfg_strength,
+                    interpolate_condition=True if interpolate_src > 0 else False,
+                    t_inter=interpolate_src
                 )
                 inferred_mel[:, frame:end, :] += mel_out * hann_window[:end - frame].unsqueeze(0).unsqueeze(-1)
             
@@ -201,6 +217,15 @@ def main(model, input, output, speaker_id, key, device, hop_length, sample_rate,
             # Step (4): Input mel and f0 into vocoder
             audio_pred = vocoder(inferred_mel.transpose(1, 2), f0)
             audio_pred = audio_pred.squeeze().cpu().numpy()
+
+            # After getting audio_pred, denormalize back to original loudness
+            audio_pred_loudness = meter.integrated_loudness(audio_pred)
+            audio_pred = pyln.normalize.loudness(audio_pred, audio_pred_loudness, original_loudness)
+
+            # Handle potential clipping after denormalization
+            max_amp = np.max(np.abs(audio_pred))
+            if max_amp > 1.0:
+                audio_pred = audio_pred * (0.99 / max_amp)
 
             # Ensure audio_pred matches the segment length
             expected_length = end_sample - start_sample

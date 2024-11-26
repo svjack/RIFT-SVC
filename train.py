@@ -9,7 +9,7 @@ from pytorch_lightning.loggers import WandbLogger
 from schedulefree import AdamWScheduleFree
 from torch.utils.data import DataLoader
 
-from rift_svc import CFM, DiT
+from rift_svc import RF, DiT
 from rift_svc.dataset import collate_fn, load_svc_dataset
 from rift_svc.lightning_module import RIFTSVCLightningModule
 
@@ -106,7 +106,7 @@ def main(cfg: DictConfig):
         mel_dim=cfg.dataset.n_mel_channels,
     )
 
-    cfm = CFM(
+    rf = RF(
         transformer=transformer,
         num_mel_channels=cfg.dataset.n_mel_channels,
         spk_drop_prob=cfg.model.get('spk_drop_prob', 0.2),
@@ -115,10 +115,11 @@ def main(cfg: DictConfig):
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
     optimizer = configure_optimizers(
-        cfm, cfg.training.learning_rate, eval(cfg.training.betas), cfg.training.weight_decay, warmup_steps)
+        rf, cfg.training.learning_rate, eval(cfg.training.betas), cfg.training.weight_decay, warmup_steps)
     model = RIFTSVCLightningModule(
-        model=cfm,
+        model=rf,
         optimizer=optimizer,
+        cfg=OmegaConf.to_container(cfg, resolve=True),
         eval_sample_steps=cfg.training.eval_sample_steps,
         eval_cfg_strength=cfg.training.eval_cfg_strength,
     )
