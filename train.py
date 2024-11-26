@@ -116,12 +116,12 @@ def main(cfg: DictConfig):
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
     optimizer = configure_optimizers(
         rf, cfg.training.learning_rate, eval(cfg.training.betas), cfg.training.weight_decay, warmup_steps)
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
+    cfg_dict['spk2idx'] = train_dataset.spk2idx
     model = RIFTSVCLightningModule(
         model=rf,
         optimizer=optimizer,
-        cfg=OmegaConf.to_container(cfg, resolve=True),
-        eval_sample_steps=cfg.training.eval_sample_steps,
-        eval_cfg_strength=cfg.training.eval_cfg_strength,
+        cfg=cfg_dict
     )
 
     checkpoint_callback = ModelCheckpoint(
@@ -133,7 +133,6 @@ def main(cfg: DictConfig):
         save_weights_only=cfg.training.save_weights_only,
     )
 
-    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     wandb_logger = WandbLogger(
         project=cfg.training.wandb_project,
         name=cfg.training.wandb_run_name,
