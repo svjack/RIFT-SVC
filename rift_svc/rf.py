@@ -16,7 +16,7 @@ from rift_svc.utils import (
 ) 
 
 
-class CFM(nn.Module):
+class RF(nn.Module):
     def __init__(
         self,
         transformer: nn.Module,
@@ -67,7 +67,7 @@ class CFM(nn.Module):
         frame_lens: torch.Tensor | None = None,    # Merged from duration and lens
         steps: int = 32,
         cfg_strength: float = 2.,
-        sway_sampling_coef: float | None = None,
+        # sway_sampling_coef: float | None = None,
         seed: int | None = None,
         interpolate_condition: bool = False,
         t_inter: float = 0.1,
@@ -126,8 +126,8 @@ class CFM(nn.Module):
             steps = int(steps * (1 - t_start))
 
         t = torch.linspace(t_start, 1, steps, device=self.device)
-        if sway_sampling_coef is not None:
-            t = t + sway_sampling_coef * (torch.cos(torch.pi / 2 * t) - 1 + t)
+        # if sway_sampling_coef is not None:
+        #     t = t + sway_sampling_coef * (torch.cos(torch.pi / 2 * t) - 1 + t)
 
         trajectory = odeint(fn, y0, t, **self.odeint_kwargs)
         
@@ -168,7 +168,7 @@ class CFM(nn.Module):
             time = torch.rand((batch,), dtype=dtype, device=self.device)
 
         t = rearrange(time, 'b -> b 1 1')
-        φ = (1 - t) * x0 + t * x1
+        xt = (1 - t) * x0 + t * x1
         flow = x1 - x0
 
         # Transformer and unconditional guiding dropout rates
@@ -176,7 +176,7 @@ class CFM(nn.Module):
 
         # Call Transformer
         pred = self.transformer(
-            x=φ, 
+            x=xt, 
             spk=spk_id, 
             f0=f0, 
             rms=rms, 
