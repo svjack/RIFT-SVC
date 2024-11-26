@@ -24,19 +24,19 @@ class RIFTSVCLightningModule(LightningModule):
         self,
         model,
         optimizer,
-        eval_sample_steps: int = 32,
-        eval_cfg_strength: float = 2.0,
+        cfg
     ):
         super().__init__()
         self.model = model
         self.optimizer = optimizer
-        self.eval_sample_steps = eval_sample_steps
-        self.eval_cfg_strength = eval_cfg_strength
+        self.cfg = cfg
+        self.eval_sample_steps = cfg['training']['eval_sample_steps']
+        self.eval_cfg_strength = cfg['training']['eval_cfg_strength']
         # Initialize vocoder
         self.vocoder = None
         
         # Save hyperparameters
-        #self.save_hyperparameters(ignore=['model'])
+        self.save_hyperparameters(ignore=['model', 'optimizer', 'vocoder'])
 
     def configure_optimizers(self):
         return self.optimizer
@@ -194,3 +194,15 @@ class RIFTSVCLightningModule(LightningModule):
             if hasattr(callback, '_every_n_train_steps'):
                 return callback._every_n_train_steps
         return None
+    
+    def state_dict(self, *args, **kwargs):
+        # Temporarily store vocoder
+        vocoder = self.vocoder
+        self.vocoder = None
+        
+        # Get state dict without vocoder
+        state = super().state_dict(*args, **kwargs)
+        
+        # Restore vocoder
+        self.vocoder = vocoder
+        return state
