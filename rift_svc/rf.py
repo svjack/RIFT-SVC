@@ -20,9 +20,8 @@ class RF(nn.Module):
     def __init__(
         self,
         transformer: nn.Module,
-        sigma: float = 0.,
         odeint_kwargs: dict = dict(
-            method='euler'  # 'midpoint'
+            method='euler'
         ),
         spk_drop_prob: float = 0.2,
         num_mel_channels: int | None = 128,
@@ -35,13 +34,9 @@ class RF(nn.Module):
         # Unconditional guiding
         self.spk_drop_prob = spk_drop_prob
 
-        # Transformer
         self.transformer = transformer
         dim = transformer.dim
         self.dim = dim
-
-        # Condition flow related parameters
-        self.sigma = sigma
 
         # Sampling related parameters
         self.odeint_kwargs = odeint_kwargs
@@ -63,8 +58,7 @@ class RF(nn.Module):
         f0: torch.Tensor,            # [b n]
         rms: torch.Tensor,           # [b n]
         cvec: torch.Tensor,          # [b n d]
-        *,
-        frame_lens: torch.Tensor | None = None,    # Merged from duration and lens
+        frame_lens: torch.Tensor | None = None,
         steps: int = 32,
         cfg_strength: float = 2.,
         # sway_sampling_coef: float | None = None,
@@ -91,7 +85,7 @@ class RF(nn.Module):
                 rms=rms, 
                 cvec=cvec, 
                 time=t, 
-                drop_spk=False,  # Update as needed
+                drop_spk=False,
                 mask=mask
             )
             if cfg_strength < 1e-5:
@@ -126,6 +120,7 @@ class RF(nn.Module):
             steps = int(steps * (1 - t_start))
 
         t = torch.linspace(t_start, 1, steps, device=self.device)
+        # sway_sampling from f5-tts
         # if sway_sampling_coef is not None:
         #     t = t + sway_sampling_coef * (torch.cos(torch.pi / 2 * t) - 1 + t)
 
@@ -147,7 +142,7 @@ class RF(nn.Module):
         *,
         lens: torch.Tensor | None = None,
     ):
-        batch, seq_len, dtype, device, sigma = *inp.shape[:2], inp.dtype, self.device, self.sigma
+        batch, seq_len, dtype, device = *inp.shape[:2], inp.dtype, self.device
 
         # Handle lengths and masks
         if not exists(lens):
@@ -171,10 +166,9 @@ class RF(nn.Module):
         xt = (1 - t) * x0 + t * x1
         flow = x1 - x0
 
-        # Transformer and unconditional guiding dropout rates
-        drop_spk = random.random() < self.spk_drop_prob  # Adjusted for DiT's drop_spk
+        # unconditional guiding dropout rates
+        drop_spk = random.random() < self.spk_drop_prob
 
-        # Call Transformer
         pred = self.transformer(
             x=xt, 
             spk=spk_id, 

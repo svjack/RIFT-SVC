@@ -1,22 +1,20 @@
 import math
-import torch
-from torch import nn
-import torch.nn.functional as F
 
 from einops import repeat
-from jaxtyping import Float, Int, Bool
+from jaxtyping import Bool, Float, Int
+import torch
+from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
 
 from rift_svc.modules import (
-    TimestepEmbedding,
-    DiTBlock,
     AdaLayerNormZero_Final,
-    MLP
+    DiTBlock,
+    MLP,
+    TimestepEmbedding,
 )
 
 
 # Conditional embedding for f0, rms, cvec
-
 class CondEmbedding(nn.Module):
     def __init__(self, cvec_dim: int, cond_dim: int):
         super().__init__()
@@ -44,7 +42,6 @@ class CondEmbedding(nn.Module):
 
 
 # noised input audio and context mixing embedding
-
 class InputEmbedding(nn.Module):
     def __init__(self, mel_dim: int, out_dim: int):
         super().__init__()
@@ -60,9 +57,7 @@ class InputEmbedding(nn.Module):
         return x
 
 
-
 # backbone using DiT blocks
-
 class DiT(nn.Module):
     def __init__(self,
                  dim: int, depth: int, head_dim: int = 64, dropout: float = 0.1, ff_mult: int = 4,
@@ -131,11 +126,11 @@ class DiT(nn.Module):
 
     def forward(
         self,
-        x: Float[torch.Tensor, "b n d1`"],     # nosied input audio
-        spk: Int[torch.Tensor, "b"],         # speaker
-        f0: Float[torch.Tensor, "b n"],     # f0
-        rms: Float[torch.Tensor, "b n"],    # rms
-        cvec: Float[torch.Tensor, "b n d2"],  # cvec
+        x: Float[torch.Tensor, "b n d1`"],  # nosied input mel
+        spk: Int[torch.Tensor, "b"],  # speaker
+        f0: Float[torch.Tensor, "b n"],
+        rms: Float[torch.Tensor, "b n"],
+        cvec: Float[torch.Tensor, "b n d2"],
         time: Float[torch.Tensor, "b"] | Float[torch.Tensor, "b n"],  # time step
         drop_spk: bool,  # cfg for speaker
         mask: Bool[torch.Tensor, "b n"] | None = None,
@@ -144,7 +139,6 @@ class DiT(nn.Module):
         if time.ndim == 0:
             time = repeat(time, ' -> b', b = batch)
 
-        # t: conditioning time, c: context (text + masked cond audio), x: noised input audio
         t = self.time_embed(time)
         if drop_spk:
             spk_embed = self.null_spk_embed.weight

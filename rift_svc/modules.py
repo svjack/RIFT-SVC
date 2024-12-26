@@ -152,7 +152,6 @@ class HubertModelWithFinalProj(HubertModel):
 
 # AdaLayerNormZero
 # return with modulated x for attn input, and params for later mlp modulation
-
 class AdaLayerNormZero(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -172,7 +171,6 @@ class AdaLayerNormZero(nn.Module):
 
 # AdaLayerNormZero for final layer
 # return only with modulated x for attn input, cuz no more mlp modulation
-
 class AdaLayerNormZero_Final(nn.Module):
     def __init__(self, dim):
         super().__init__()
@@ -189,9 +187,8 @@ class AdaLayerNormZero_Final(nn.Module):
         x = self.norm(x) * (1 + scale)[:, None, :] + shift[:, None, :]
         return x
 
-
+# ReLU^2
 class ReLU2(nn.Module):
-    # ReLU^2
     def forward(self, x):
         return F.relu(x, inplace=True).square()
 
@@ -306,7 +303,6 @@ class Attention(nn.Module):
 
 
 # DiT Block
-
 class DiTBlock(nn.Module):
 
     def __init__(self, dim: int, head_dim: int, ff_mult: float = 4, dropout: float = 0.1):
@@ -346,7 +342,6 @@ class DiTBlock(nn.Module):
 
 
 # sinusoidal position embedding
-
 class SinusPositionEmbedding(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
@@ -363,7 +358,6 @@ class SinusPositionEmbedding(nn.Module):
 
 
 # time step conditioning embedding
-
 class TimestepEmbedding(nn.Module):
     def __init__(self, dim: int, freq_embed_dim: int = 256):
         super().__init__()

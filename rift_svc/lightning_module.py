@@ -1,21 +1,16 @@
 import gc
-import io
 import os
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torchaudio
 import wandb
-from PIL import Image
 from pytorch_lightning import LightningModule
-from pytorch_lightning.utilities import grad_norm
 
-import rift_svc.BigVGAN.bigvgan as bigvgan
-from rift_svc.nsf_hifigan import NsfHifiGAN
 from rift_svc.metrics import mcd, psnr, si_snr, snr
 from rift_svc.modules import get_mel_spectrogram
+from rift_svc.nsf_hifigan import NsfHifiGAN
 from rift_svc.utils import draw_mel_specs, l2_grad_norm
 
 
@@ -32,10 +27,8 @@ class RIFTSVCLightningModule(LightningModule):
         self.cfg = cfg
         self.eval_sample_steps = cfg['training']['eval_sample_steps']
         self.eval_cfg_strength = cfg['training']['eval_cfg_strength']
-        # Initialize vocoder
         self.vocoder = None
-        
-        # Save hyperparameters
+
         self.save_hyperparameters(ignore=['model', 'optimizer', 'vocoder'])
 
     def configure_optimizers(self):

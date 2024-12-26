@@ -3,11 +3,11 @@ import os
 import random
 
 import torch
-import torch.nn.functional as F
-from torch.utils.data import Dataset
 from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data import Dataset
 
 from rift_svc.utils import interpolate_tensor
+
 
 class SVCDataset(Dataset):
     def __init__(
@@ -15,7 +15,7 @@ class SVCDataset(Dataset):
         data_dir: str,
         meta_info_path: str,
         split = "train",
-        max_frame_len = 1024,
+        max_frame_len = 256,
     ):
         self.data_dir = data_dir
         self.max_frame_len = max_frame_len
@@ -41,10 +41,7 @@ class SVCDataset(Dataset):
         spk = sample['speaker']
         path = os.path.join(self.data_dir, spk, sample['file_name'])
         spk_id = torch.LongTensor([self.spk2idx[spk]]) # [1]
-        # mel_spec = torch.load(path + ".mel.pt", weights_only=True).squeeze(0).T # [T, C]
-        # rms = torch.load(path + ".rms.pt", weights_only=True).squeeze(0) # [T]
-        # f0 = torch.load(path + ".f0.pt", weights_only=True).squeeze(0) # [T]
-        # cvec = torch.load(path + ".cvec.pt", weights_only=True).squeeze(0) # [N, D]
+
         combined = torch.load(path + ".combined.pt", weights_only=True, map_location=torch.device('cpu'), mmap=True)
         mel_spec = combined.get('mel').squeeze(0).T
         rms = combined.get('rms').squeeze(0)
@@ -87,59 +84,19 @@ class SVCDataset(Dataset):
         )
 
         return result
-    
 
-# load dataset
 
-def load_svc_dataset(data_dir: str, meta_info_path: str, split = "train", max_frame_len = 1024) -> SVCDataset:
+def load_svc_dataset(data_dir: str, meta_info_path: str, split = "train", max_frame_len = 256) -> SVCDataset:
     return SVCDataset(data_dir, meta_info_path, split, max_frame_len)
 
-# collation
-
-# def collate_fn(batch):
-#     # Separate different features from the batch
-#     spk_ids = [item['spk_id'] for item in batch]
-
-#     # Get the maximum length in the batch
-#     frame_lens = [item['frame_len'] for item in batch]
-
-#     max_frame_len = max(frame_lens)
-#     b = len(batch)
-#     # Pad sequences to max length
-#     mel_specs_padded = torch.zeros(b, max_frame_len, batch[0]['mel_spec'].shape[-1])
-#     rmss_padded = torch.zeros(b, max_frame_len)
-#     f0s_padded = torch.zeros(b, max_frame_len)
-#     cvecs_padded = torch.zeros(b, max_frame_len, batch[0]['cvec'].shape[-1])
-
-#     for i, item in enumerate(batch):
-#         length = item['frame_len']
-#         mel_specs_padded[i, :length] = item['mel_spec']
-#         rmss_padded[i, :length] = item['rms']
-#         f0s_padded[i, :length] = item['f0']
-#         cvecs_padded[i, :length] = item['cvec']
-
-#     # Stack speaker IDs
-#     spk_ids = torch.cat(spk_ids)
-#     frame_lens = torch.tensor(frame_lens)
-
-#     return {
-#         'spk_id': spk_ids,
-#         'mel_spec': mel_specs_padded,
-#         'rms': rmss_padded,
-#         'f0': f0s_padded,
-#         'cvec': cvecs_padded,
-#         'frame_lens': frame_lens
-#     }
 
 def collate_fn(batch):
-    # Separate different features from the batch
     spk_ids = [item['spk_id'] for item in batch]
     mel_specs = [item['mel_spec'] for item in batch]
     rmss = [item['rms'] for item in batch]
     f0s = [item['f0'] for item in batch]
     cvecs = [item['cvec'] for item in batch]
 
-    # Get the maximum length in the batch
     frame_lens = [item['frame_len'] for item in batch]
 
     # Pad sequences to max length
@@ -148,7 +105,6 @@ def collate_fn(batch):
     f0s_padded = pad_sequence(f0s, batch_first=True)
     cvecs_padded = pad_sequence(cvecs, batch_first=True)
 
-    # Stack speaker IDs
     spk_ids = torch.cat(spk_ids)
     frame_lens = torch.tensor(frame_lens)
 
