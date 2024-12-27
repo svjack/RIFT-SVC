@@ -8,6 +8,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
 from pytorch_lightning.loggers import WandbLogger
 from schedulefree import AdamWScheduleFree
 from torch.utils.data import DataLoader
+import torch
 
 from rift_svc import RF, DiT
 from rift_svc.dataset import collate_fn, load_svc_dataset
@@ -83,6 +84,14 @@ def configure_optimizers(model, lr, betas, weight_decay, warmup_steps):
     return optimizer
 
 
+def load_state_dict(model, state_dict, strict=False):
+    """Load state dict while handling 'model.' prefix"""
+    if any(k.startswith('model.') for k in state_dict.keys()):
+        # Remove 'model.' prefix
+        state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
+    return model.load_state_dict(state_dict, strict=strict)
+
+
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(cfg: DictConfig):
     pl.seed_everything(cfg.seed)
@@ -112,6 +121,19 @@ def main(cfg: DictConfig):
         spk_drop_prob=cfg.model.get('spk_drop_prob', 0.2),
         lognorm=cfg.model.get('lognorm', False),
     )
+
+    # Load pretrained weights if specified
+    if cfg.model.get('pretrained_path', None) is not None:
+        state_dict = torch.load(cfg.model.pretrained_path, map_location='cpu')
+        if 'state_dict' in state_dict:
+            state_dict = state_dict['state_dict']
+        # Load only model weights, allowing mismatched keys for speaker embeddings
+        missing_keys, unexpected_keys = load_state_dict(rf, state_dict)
+        print(f"Loaded pretrained model from {cfg.model.pretrained_path}")
+        if missing_keys:
+            print(f"Missing keys: {missing_keys}")
+        if unexpected_keys:
+            print(f"Unexpected keys: {unexpected_keys}")
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
     optimizer = configure_optimizers(
