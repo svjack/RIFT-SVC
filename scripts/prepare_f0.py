@@ -11,7 +11,6 @@ Usage:
     python generate_f0.py --meta-info META_INFO_JSON --data-dir DATA_DIR --model-path MODEL_PATH [OPTIONS]
 
 Options:
-    --meta-info FILE_PATH        Path to the meta_info.json file. (Required)
     --data-dir DIRECTORY         Path to the root of the preprocessed dataset directory. (Required)
     --model-path FILE_PATH       Path to the pre-trained RMVPE model file. (Required)
     --hop-length INTEGER         Hop length for f0 extraction. (Default: 256)
@@ -125,12 +124,6 @@ def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, 
 
 @click.command()
 @click.option(
-    '--meta-info',
-    type=click.Path(exists=True, file_okay=True, readable=True),
-    required=True,
-    help='Path to the meta_info.json file.'
-)
-@click.option(
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
@@ -170,11 +163,11 @@ def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, 
     default=False,
     help='Enable verbose output.'
 )
-def generate_f0(meta_info, data_dir, model_path, hop_length, sample_rate, num_workers_per_device, verbose):
+def generate_f0(data_dir, model_path, hop_length, sample_rate, num_workers_per_device, verbose):
     """
     Generate f0 for each audio file specified in the meta_info.json and save them as .f0.pt files.
     """
-    # Load meta_info.json
+    meta_info = Path(data_dir) / "meta_info.json"
     try:
         with open(meta_info, 'r', encoding='utf-8') as f:
             meta = json.load(f)

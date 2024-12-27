@@ -9,7 +9,6 @@ Usage:
     python prepare_mel.py --meta-info META_INFO_JSON --data-dir DATA_DIR [OPTIONS]
 
 Options:
-    --meta-info FILE_PATH        Path to the meta_info.json file. (Required)
     --data-dir DIRECTORY         Path to the root of the preprocessed dataset directory. (Required)
     --hop-length INTEGER         Hop length for Mel spectrogram. (Default: 256)
     --n-mel-channels INTEGER     Number of Mel channels. (Default: 128)
@@ -105,12 +104,6 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
 
 @click.command()
 @click.option(
-    '--meta-info',
-    type=click.Path(exists=True, file_okay=True, readable=True),
-    required=True,
-    help='Path to the meta_info.json file.'
-)
-@click.option(
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
@@ -150,12 +143,12 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
     default=False,
     help='Enable verbose output.'
 )
-def generate_mel_specs(meta_info, data_dir, hop_length, n_mel_channels, sample_rate, num_workers, verbose):
+def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_workers, verbose):
     """
     Generate Mel spectrograms for each audio file specified in the meta_info.json and save them as .mel.pt files.
     This version uses multiprocessing for enhanced efficiency.
     """
-    # Load meta_info.json
+    meta_info = Path(data_dir) / "meta_info.json"
     try:
         with open(meta_info, 'r', encoding='utf-8') as f:
             meta = json.load(f)

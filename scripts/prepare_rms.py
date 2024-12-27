@@ -9,7 +9,6 @@ Usage:
     python generate_rms.py --meta-info META_INFO_JSON --data-dir DATA_DIR [OPTIONS]
 
 Options:
-    --meta-info FILE_PATH        Path to the meta_info.json file. (Required)
     --data-dir DIRECTORY         Path to the root of the preprocessed dataset directory. (Required)
     --hop-length INTEGER         Hop length for RMS extraction. (Default: 256)
     --verbose                    Enable verbose output.
@@ -29,12 +28,6 @@ from rift_svc.modules import RMSExtractor
 
 @click.command()
 @click.option(
-    '--meta-info',
-    type=click.Path(exists=True, file_okay=True, readable=True),
-    required=True,
-    help='Path to the meta_info.json file.'
-)
-@click.option(
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
@@ -53,11 +46,12 @@ from rift_svc.modules import RMSExtractor
     default=False,
     help='Enable verbose output.'
 )
-def generate_rms(meta_info, data_dir, hop_length, verbose):
+def generate_rms(data_dir, hop_length, verbose):
     """
     Generate RMS energy for each audio file specified in the meta_info.json and save them as .rms.pt files.
     """
     # Load meta_info.json
+    meta_info = Path(data_dir) / "meta_info.json"
     try:
         with open(meta_info, 'r', encoding='utf-8') as f:
             meta = json.load(f)

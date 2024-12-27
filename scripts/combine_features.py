@@ -6,14 +6,9 @@ from tqdm import tqdm
 import torch
 from multiprocessing import Pool, cpu_count
 from functools import partial
+from pathlib import Path
 
 @click.command()
-@click.option(
-    '--meta-info',
-    type=click.Path(exists=True, file_okay=True, readable=True),
-    required=True,
-    help='Path to the meta_info.json file.'
-)
 @click.option(
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
@@ -26,12 +21,12 @@ from functools import partial
     default=False,
     help='Enable verbose output.'
 )
-def combine_features(meta_info, data_dir, verbose):
+def combine_features(data_dir, verbose):
     """
     Combine precomputed features (mel_spec, rms, f0, cvec) into a single file for each audio.
     This enhances loading speed by reducing the number of file I/O operations during data loading.
     """
-    # Load meta_info.json
+    meta_info = Path(data_dir) / "meta_info.json"
     try:
         with open(meta_info, 'r', encoding='utf-8') as f:
             meta = json.load(f)

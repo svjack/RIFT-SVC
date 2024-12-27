@@ -7,13 +7,11 @@ extracts content vectors for each audio file using a HuBERT-like model, and save
 as .contentvec.pt files in the same directory as the original audio files.
 
 Usage:
-    python generate_contentvec.py --meta-info META_INFO_JSON --data-dir DATA_DIR --model-path MODEL_PATH [OPTIONS]
+    python generate_contentvec.py --data-dir DATA_DIR --model-path MODEL_PATH [OPTIONS]
 
 Options:
-    --meta-info FILE_PATH           Path to the meta_info.json file. (Required)
     --data-dir DIRECTORY            Path to the root of the preprocessed dataset directory. (Required)
     --model-path FILE_PATH          Path to the pre-trained HuBERT-like model file. (Required)
-    --sample-rate INTEGER           Sample rate of the audio files in Hz. (Default: 16000)
     --num-workers-per-device INTEGER  Number of workers per device for multiprocessing. (Default: 2)
     --verbose                       Enable verbose output.
 """
@@ -35,10 +33,12 @@ import click
 from tqdm import tqdm
 import numpy as np
 
+from rift_svc.modules import HubertModelWithFinalProj
 
 
+CVEC_SAMPLE_RATE = 16000
 
-def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbose, device_id=None):
+def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id=None):
     """
     Worker function to extract content vectors from a subset of audio files.
 
@@ -46,7 +46,6 @@ def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbo
         audio_subset (list): List of audio entries to process.
         data_dir (Path): Root directory of the preprocessed dataset.
         model_path (str): Path to the pre-trained HuBERT-like model.
-        sample_rate (int): Sample rate of the audio files in Hz.
         queue (Queue): Multiprocessing queue to communicate progress.
         verbose (bool): If True, enable verbose output.
         device_id (int or None): CUDA device ID to use. If None, use CPU.
@@ -95,8 +94,8 @@ def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbo
                 waveform = waveform.mean(dim=0, keepdim=True)  # Shape: (1, samples)
 
             # Resample if necessary (assuming preprocessing handled sample rate)
-            if sr != sample_rate:
-                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate).to(device)
+            if sr != CVEC_SAMPLE_RATE:
+                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=CVEC_SAMPLE_RATE).to(device)
                 waveform = resampler(waveform)
 
             # Run the model
@@ -123,12 +122,6 @@ def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbo
 
 @click.command()
 @click.option(
-    '--meta-info',
-    type=click.Path(exists=True, file_okay=True, readable=True),
-    required=True,
-    help='Path to the meta_info.json file.'
-)
-@click.option(
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
@@ -140,13 +133,6 @@ def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbo
     default='pretrained/content-vec-best',
     show_default=True,
     help='Path to the pre-trained HuBERT-like model file.'
-)
-@click.option(
-    '--sample-rate',
-    type=int,
-    default=16000,
-    show_default=True,
-    help='Sample rate of the audio files in Hz.'
 )
 @click.option(
     '--num-workers-per-device',
@@ -161,11 +147,11 @@ def worker_process(audio_subset, data_dir, model_path, sample_rate, queue, verbo
     default=False,
     help='Enable verbose output.'
 )
-def generate_contentvec(meta_info, data_dir, model_path, sample_rate, num_workers_per_device, verbose):
+def generate_contentvec(data_dir, model_path, num_workers_per_device, verbose):
     """
     Generate content vectors for each audio file specified in the meta_info.json and save them as .contentvec.pt files.
     """
-    # Load meta_info.json
+    meta_info = Path(data_dir) / "meta_info.json"
     try:
         with open(meta_info, 'r', encoding='utf-8') as f:
             meta = json.load(f)
@@ -240,7 +226,6 @@ def generate_contentvec(meta_info, data_dir, model_path, sample_rate, num_worker
                 split_audios[i],
                 Path(data_dir),
                 model_path,
-                sample_rate,
                 queue,
                 verbose,
                 device

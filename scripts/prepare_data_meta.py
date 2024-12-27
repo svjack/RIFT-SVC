@@ -10,11 +10,11 @@ Usage:
 
 Options:
     --data-dir                 Path to the preprocessed dataset directory. (Required)
-    --output-file              Path to the output JSON file. (Default: meta_info.json)
     --split-type               Type of data split: 'random' or 'stratified'. (Default: 'random')
     --num-test                 Number of testing samples. (Default: 20)
     --num-test-per-speaker     Number of testing samples per speaker. (Default: 1)
     --seed                     Random seed for reproducibility. (Default: 42)
+    --only-include-speakers     Only include these speakers in the meta-information. (Default: None)
 """
 import json
 import random
@@ -77,7 +77,7 @@ def perform_random_split(speaker_to_files, num_test, seed):
     return train_audios, test_audios
 
 
-def perform_stratified_split(speaker_to_files, num_test_per_speaker, seed):
+def perform_stratified_split(speaker_to_files, num_test_per_speaker, seed, only_include_speakers=None):
     """
     Perform a stratified split of the dataset into training and testing sets, ensuring each speaker has
     a specified number of testing samples.
@@ -86,7 +86,7 @@ def perform_stratified_split(speaker_to_files, num_test_per_speaker, seed):
         speaker_to_files (dict): Mapping of speakers to their audio files.
         num_test_per_speaker (int): Number of testing samples per speaker.
         seed (int): Random seed.
-
+        only_include_speakers (list): Only include these speakers in the meta-information.
     Returns:
         tuple: (train_audios, test_audios)
     """
@@ -98,6 +98,12 @@ def perform_stratified_split(speaker_to_files, num_test_per_speaker, seed):
         "gtsinger-KO",
         "gtsinger-RU"
     ]
+
+    if only_include_speakers:
+        only_include_speakers = only_include_speakers.split(',')
+        only_include_speakers = [speaker.strip() for speaker in only_include_speakers]
+        # exclude speakers not in only_include_speakers
+        excluded_speakers += [speaker for speaker in speaker_to_files.keys() if speaker not in only_include_speakers]
 
     random.seed(seed)
     train_audios = []
@@ -132,7 +138,7 @@ def perform_stratified_split(speaker_to_files, num_test_per_speaker, seed):
     return train_audios, test_audios
 
 
-def generate_meta_info(speaker_to_files, split_type, num_test, num_test_per_speaker, seed):
+def generate_meta_info(speaker_to_files, split_type, num_test, num_test_per_speaker, seed, only_include_speakers=None):
     """
     Generate the meta-information dictionary based on the split type.
 
@@ -151,7 +157,7 @@ def generate_meta_info(speaker_to_files, split_type, num_test, num_test_per_spea
     if split_type == 'random':
         train_audios, test_audios = perform_random_split(speaker_to_files, num_test, seed)
     elif split_type == 'stratified':
-        train_audios, test_audios = perform_stratified_split(speaker_to_files, num_test_per_speaker, seed)
+        train_audios, test_audios = perform_stratified_split(speaker_to_files, num_test_per_speaker, seed, only_include_speakers)
     else:
         raise ValueError("Invalid split_type. Choose 'random' or 'stratified'.")
 
@@ -170,13 +176,6 @@ def generate_meta_info(speaker_to_files, split_type, num_test, num_test_per_spea
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
     help='Path to the preprocessed dataset directory.'
-)
-@click.option(
-    '--output-file',
-    type=click.Path(writable=True),
-    default='meta_info.json',
-    show_default=True,
-    help='Path to the output JSON file.'
 )
 @click.option(
     '--split-type',
@@ -200,13 +199,20 @@ def generate_meta_info(speaker_to_files, split_type, num_test, num_test_per_spea
     help="Number of testing samples per speaker for 'stratified' split."
 )
 @click.option(
+    '--only-include-speakers',
+    type=str,
+    default=None,
+    show_default=True,
+    help="Only include these speakers in the meta-information."
+)
+@click.option(
     '--seed',
     type=int,
     default=42,
     show_default=True,
     help="Random seed for reproducibility."
 )
-def main(data_dir, output_file, split_type, num_test, num_test_per_speaker, seed):
+def main(data_dir, split_type, num_test, num_test_per_speaker, only_include_speakers, seed):
     """
     Generate meta-information for the preprocessed audio dataset.
 
@@ -226,11 +232,11 @@ def main(data_dir, output_file, split_type, num_test, num_test_per_speaker, seed
         split_type=split_type.lower(),
         num_test=num_test,
         num_test_per_speaker=num_test_per_speaker,
-        seed=seed
+        seed=seed,
+        only_include_speakers=only_include_speakers
     )
 
-    # Save to JSON file
-    output_file = Path(output_file)
+    output_file = Path(data_dir) / "meta_info.json"
     try:
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(meta_info, f, ensure_ascii=False, indent=4)
