@@ -42,11 +42,11 @@ def get_rms(
 class Slicer:
     def __init__(self,
                  sr: int,
-                 threshold: float = -40.,
-                 min_length: int = 5000,
-                 min_interval: int = 300,
-                 hop_size: int = 20,
-                 max_sil_kept: int = 5000,
+                 threshold: float = -30.,
+                 min_length: int = 3000,
+                 min_interval: int = 100,
+                 hop_size: int = 10,
+                 max_sil_kept: int = 300,
                  look_ahead_frames: int = 4):
         if not min_length >= min_interval >= hop_size:
             raise ValueError('The following condition must be satisfied: min_length >= min_interval >= hop_size')
@@ -253,15 +253,15 @@ def main():
     parser = ArgumentParser()
     parser.add_argument('audio', type=str, help='The audio to be sliced')
     parser.add_argument('--out', type=str, help='Output directory of the sliced audio clips')
-    parser.add_argument('--db_thresh', type=float, required=False, default=-40,
+    parser.add_argument('--db_thresh', type=float, required=False, default=-30,
                         help='The dB threshold for silence detection')
-    parser.add_argument('--min_length', type=int, required=False, default=5000,
+    parser.add_argument('--min_length', type=int, required=False, default=3000,
                         help='The minimum milliseconds required for each sliced audio clip')
-    parser.add_argument('--min_interval', type=int, required=False, default=300,
+    parser.add_argument('--min_interval', type=int, required=False, default=100,
                         help='The minimum milliseconds for a silence part to be sliced')
     parser.add_argument('--hop_size', type=int, required=False, default=10,
                         help='Frame length in milliseconds')
-    parser.add_argument('--max_sil_kept', type=int, required=False, default=500,
+    parser.add_argument('--max_sil_kept', type=int, required=False, default=300,
                         help='The maximum silence length kept around the sliced clip, presented in milliseconds')
     args = parser.parse_args()
     
