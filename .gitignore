@@ -10,8 +10,10 @@ mels/*
 .cache/*
 
 !pretrained/README.md
+!pretrained/download.py
 !data/README.md
-!ckpts/README.md
+!.gitkeep
 
 *.wav
 *.mp3
+*.flac
