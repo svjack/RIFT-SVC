@@ -17,7 +17,6 @@ from slicer import Slicer
 
 
 
-
 def extract_state_dict(ckpt):
     state_dict = ckpt['state_dict']
     new_state_dict = {}
@@ -40,7 +39,7 @@ def extract_state_dict(ckpt):
 @click.option('--device', type=str, default=None, help='Device to use (cuda/cpu)')
 @click.option('--overlap-size', type=int, default=32, help='Overlap size')
 @click.option('--infer-steps', type=int, default=32, help='Number of inference steps')
-@click.option('--cfg-strength', type=float, default=2.0, help='Classifier-free guidance strength')
+@click.option('--cfg-strength', type=float, default=0.0, help='Classifier-free guidance strength')
 @click.option('--target-loudness', type=float, default=-18.0, help='Target loudness in LUFS for normalization')
 @click.option('--interpolate-src', type=float, default=0.0, help='Interpolate source audio')
 @click.option('--fade-duration', type=float, default=20.0, help='Fade duration in milliseconds')
@@ -105,11 +104,11 @@ def main(
     # Initialize Slicer
     slicer = Slicer(
         sr=sample_rate,
-        threshold=-40.0,
-        min_length=5000,
-        min_interval=300,
-        hop_size=20,
-        max_sil_kept=5000
+        threshold=-30.0,
+        min_length=3000,
+        min_interval=100,
+        hop_size=10,
+        max_sil_kept=300
     )
 
     # Initialize Loudness Meter
