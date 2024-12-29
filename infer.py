@@ -1,4 +1,3 @@
-import os
 import torch
 import torchaudio
 import click
@@ -37,10 +36,10 @@ def extract_state_dict(ckpt):
 @click.option('--speaker', type=str, required=True, help='Target speaker')
 @click.option('--key-shift', type=int, default=0, help='Pitch shift in semitones')
 @click.option('--device', type=str, default=None, help='Device to use (cuda/cpu)')
-@click.option('--overlap-size', type=int, default=32, help='Overlap size')
 @click.option('--infer-steps', type=int, default=32, help='Number of inference steps')
 @click.option('--cfg-strength', type=float, default=0.0, help='Classifier-free guidance strength')
 @click.option('--target-loudness', type=float, default=-18.0, help='Target loudness in LUFS for normalization')
+@click.option('--restore_loudness', type=bool, default=False, help='Restore loudness')
 @click.option('--interpolate-src', type=float, default=0.0, help='Interpolate source audio')
 @click.option('--fade-duration', type=float, default=20.0, help='Fade duration in milliseconds')
 def main(
@@ -50,7 +49,6 @@ def main(
     speaker,
     key_shift,
     device,
-    overlap_size,
     infer_steps,
     cfg_strength,
     target_loudness,
@@ -82,7 +80,6 @@ def main(
     except KeyError:
         raise ValueError(f"Speaker {speaker} not found in the model's speaker list, valid speakers are {spk2idx.keys()}")
     hop_length = dataset_cfg['hop_length']
-    window_size = dataset_cfg['max_frame_len']
     sample_rate = dataset_cfg['sample_rate']
 
     vocoder = NsfHifiGAN('pretrained/nsf_hifigan_44.1k_hop512_128bin_2024.02/model.ckpt').to(device)
@@ -114,7 +111,6 @@ def main(
     # Initialize Loudness Meter
     meter = pyln.Meter(sample_rate)  # Create BS.1770 meter
 
-    # Add these constants near the top of the main function
     crossfade_ms = 40  # crossfade length in milliseconds
     crossfade_size = int(crossfade_ms * sample_rate / 1000)  # convert to samples
 
@@ -192,9 +188,10 @@ def main(
         audio_out = vocoder(mel_out.transpose(1, 2), f0)
         audio_out = audio_out.squeeze().cpu().numpy()
         
-        # Restore original loudness
-        audio_out_loudness = meter.integrated_loudness(audio_out)
-        audio_out = pyln.normalize.loudness(audio_out, audio_out_loudness, original_loudness)
+        if restore_loudness:
+            # Restore original loudness
+            audio_out_loudness = meter.integrated_loudness(audio_out)
+            audio_out = pyln.normalize.loudness(audio_out, audio_out_loudness, original_loudness)
         
         # Handle clipping
         max_amp = np.max(np.abs(audio_out))
@@ -236,15 +233,6 @@ def main(
 
     # Trim any extra padding
     result_audio = result_audio[:len(audio)]
-
-    # # Final loudness normalization for the complete audio
-    # final_loudness = meter.integrated_loudness(result_audio)
-    # result_audio = pyln.normalize.loudness(result_audio, final_loudness, target_loudness)
-
-    # # Final clipping check
-    # max_amp = np.max(np.abs(result_audio))
-    # if max_amp > 1.0:
-    #     result_audio = result_audio * (0.99 / max_amp)
 
     # Save output
     click.echo("Saving output...")
