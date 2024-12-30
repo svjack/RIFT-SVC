@@ -32,7 +32,7 @@ pip install -r requirements.txt
 python pretrained/download.py
 ```
 
-#### 5. Download pretrained weights for fine-tuning (Optional).
+#### 5. Download pretrained weights for fine-tuning.
 
 | Model | Command |
 | --- | --- |
