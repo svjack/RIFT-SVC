@@ -77,6 +77,13 @@ You can adjust the DATA_DIR in `prepare.sh` to your own data directory. We use `
 ## Training
 
 #### 8. Start Finetuning
+
+To monitor the training process, we use wandb. 
+```bash
+wandb login
+```
+You can find the training logs in the wandb dashboard. See [wandb](https://wandb.ai/) for more details.
+
 If one speaker is used, an example command is:
 ```bash
 python train.py --config-name finetune model=dit-768-12 training.wandb_run_name=finetune_ckpt-v3_dit-768-12_30000steps-lr0.00005 training.learning_rate=5e-5 +model.lognorm=true training.max_steps=30000 training.weight_decay=0.01 training.batch_size_per_gpu=64 training.save_per_steps=1000 training.test_per_steps=1000 +model.pretrained_path=pretrained/pretrain-v3-final_dit-768-12_300000steps-lr0.0003.ckpt +model.spk_drop_prob=0.0 training.eval_cfg_strength=0.0
@@ -108,7 +115,7 @@ Since we use hydra to manage the config, you can also override the config file b
 The above settings are tested on one 3090 GPU, consuming ~20GB VRAM.
 
 
-To monitor the training process, we use wandb. You can find the training logs in the wandb dashboard. See [wandb](https://wandb.ai/) for more details.
+
 
 
 ## Inference
