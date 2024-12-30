@@ -149,10 +149,17 @@ For 768-12 model, the VRAM consumption is ~4GB.
 ## References
 
 [1] NSF-HIFIGAN: https://github.com/openvpi/SingingVocoders
+
 [2] BigVGAN: https://github.com/NVIDIA/BigVGAN
+
 [3] ConvNext: https://github.com/facebookresearch/ConvNeXt
+
 [4] Spectral parameterization: Yang, G., Simon, J. B., & Bernstein, J. (2023). A spectral condition for feature learning. arXiv preprint arXiv:2310.17813.
+
 [5] Scheduler-free optimizer: https://github.com/facebookresearch/schedule_free
+
 [6] LogNorm noise scheduler: Esser, P., Kulal, S., Blattmann, A., Entezari, R., Müller, J., Saini, H., ... & Rombach, R. (2024, March). Scaling rectified flow transformers for high-resolution image synthesis. In Forty-first International Conference on Machine Learning.
+
 [7] UNet-like skip connections: Bao, F., Nie, S., Xue, K., Cao, Y., Li, C., Su, H., & Zhu, J. (2023). All are worth words: A vit backbone for diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition (pp. 22669-22679).
+
 [8] MuP: Yang, G., Hu, E. J., Babuschkin, I., Sidor, S., Liu, X., Farhi, D., ... & Gao, J. (2022). Tensor programs v: Tuning large neural networks via zero-shot hyperparameter transfer. arXiv preprint arXiv:2203.03466.
