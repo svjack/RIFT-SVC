@@ -6,40 +6,46 @@
 
 
 ---
-## Environment
+## Environment Preparation
 
-#### 1. Create a new conda environment
+#### 1. Clone the repository
+```bash
+git clone https://github.com/Pur1zumu/RIFT-SVC.git
+cd RIFT-SVC
+```
+
+#### 2. Create a new conda environment
 ```bash
 conda create -n rift-svc python=3.11
 conda activate rift-svc
 ```
 
-#### 2. Install torch that supports your cuda version. See [PyTorch](https://pytorch.org/get-started/locally/) for more details.
+#### 3. Install torch that supports your cuda version. See [PyTorch](https://pytorch.org/get-started/locally/) for more details.
 E.g., for cuda 12.1, use:
 ```bash
 pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
 
-#### 3. Install other dependencies
+#### 4. Install other dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
 ## Models and Data Preparation
 
-#### 4. Download pretrained models for feature extraction and vocoder.
+#### 5. Download pretrained models for feature extraction and vocoder.
 ```bash
 python pretrained/download.py
 ```
 
-#### 5. Download pretrained weights for fine-tuning.
+#### 6. Download pretrained weights for fine-tuning.
 
 | Model | Command |
 | --- | --- |
 | pretrain-v3-final_dit-768-12_300000steps-lr0.0003 | wget https://huggingface.co/Pur1zumu/RIFT-SVC-pretrained/resolve/main/pretrain-v3-final_dit-768-12_300000steps-lr0.0003.ckpt -O pretrained/pretrain-v3-final_dit-768-12_300000steps-lr0.0003.ckpt |
 
 
-#### 6. Prepare data and extract features.
+#### 7. Prepare data and extract features.
 You should structure your data like this:
 ```
 data/
@@ -70,7 +76,7 @@ You can adjust the DATA_DIR in `prepare.sh` to your own data directory. We use `
 
 ## Training
 
-#### 7. Start Finetuning
+#### 8. Start Finetuning
 If one speaker is used, an example command is:
 ```bash
 python train.py --config-name finetune model=dit-768-12 training.wandb_run_name=finetune_ckpt-v3_dit-768-12_30000steps-lr0.00005 training.learning_rate=5e-5 +model.lognorm=true training.max_steps=30000 training.weight_decay=0.01 training.batch_size_per_gpu=64 training.save_per_steps=1000 training.test_per_steps=1000 +model.pretrained_path=pretrained/pretrain-v3-final_dit-768-12_300000steps-lr0.0003.ckpt +model.spk_drop_prob=0.0 training.eval_cfg_strength=0.0
@@ -107,7 +113,7 @@ To monitor the training process, we use wandb. You can find the training logs in
 
 ## Inference
 
-#### 8. Inference
+#### 9. Inference
 ```bash
 python infer.py --model ckpts/finetune_ckpt-v3_dit-768-12_30000steps-lr0.00005/model-step=24000.ckpt --input 0.wav --output 0_steps32_cfg0.wav --speaker speaker1 --infer-steps 32 --cfg-strength 0.0
 ```
