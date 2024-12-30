@@ -4,6 +4,10 @@
 
  Implementation of **RIFT-SVC**, a singing voice conversion model based on Rectified Flow Transformer. We tested several architecture-wise and training-wise improvements over vanilla Diffusion Transformer.
 
+---
+## MV Demonstrations
+
+- https://www.bilibili.com/video/BV1qe6GYzEtN/
 
 ---
 ## Environment Preparation
