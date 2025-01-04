@@ -7,7 +7,7 @@
 ---
 ## MV Demonstrations
 
-- https://www.bilibili.com/video/BV1qe6GYzEtN/
+- https://www.bilibili.com/video/BV1XurpY8E98
 
 ---
 ## Environment Preparation
