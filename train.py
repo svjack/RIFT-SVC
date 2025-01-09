@@ -119,7 +119,7 @@ def main(cfg: DictConfig):
         transformer=transformer,
         num_mel_channels=cfg.dataset.n_mel_channels,
         spk_drop_prob=cfg.model.get('spk_drop_prob', 0.2),
-        lognorm=cfg.model.get('lognorm', False),
+        lognorm=cfg.model.get('lognorm', True),
     )
 
     # Load pretrained weights if specified
