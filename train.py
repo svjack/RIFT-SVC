@@ -158,7 +158,7 @@ def main(cfg: DictConfig):
     wandb_logger = WandbLogger(
         project=cfg.training.wandb_project,
         name=cfg.training.wandb_run_name,
-        id=cfg.model.get('wandb_resume_id', None),
+        id=cfg.training.get('wandb_resume_id', None),
         resume='allow',
     )
     if wandb_logger.experiment.config:
@@ -205,6 +205,7 @@ def main(cfg: DictConfig):
             num_workers=cfg.training.num_workers,
             collate_fn=collate_fn,
         ),
+        ckpt_path=cfg.training.get('resume_from_checkpoint', None),
     )
 
 if __name__ == "__main__":
