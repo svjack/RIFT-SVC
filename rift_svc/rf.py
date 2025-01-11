@@ -23,7 +23,8 @@ class RF(nn.Module):
         odeint_kwargs: dict = dict(
             method='euler'
         ),
-        spk_drop_prob: float = 0.2,
+        #spk_drop_prob: float = 0.2,
+        whisper_drop_prob: float = 0.5,
         num_mel_channels: int | None = 128,
         lognorm: bool = False,
     ):
@@ -32,7 +33,8 @@ class RF(nn.Module):
         self.num_mel_channels = num_mel_channels
 
         # Unconditional guiding
-        self.spk_drop_prob = spk_drop_prob
+        # self.spk_drop_prob = spk_drop_prob
+        self.whisper_drop_prob = whisper_drop_prob
 
         self.transformer = transformer
         dim = transformer.dim
@@ -58,6 +60,7 @@ class RF(nn.Module):
         f0: torch.Tensor,            # [b n]
         rms: torch.Tensor,           # [b n]
         cvec: torch.Tensor,          # [b n d]
+        whisper: torch.Tensor,      # [b n d2]
         frame_lens: torch.Tensor | None = None,
         steps: int = 32,
         cfg_strength: float = 2.,
@@ -84,8 +87,9 @@ class RF(nn.Module):
                 f0=f0, 
                 rms=rms, 
                 cvec=cvec, 
+                whisper=whisper,
                 time=t, 
-                drop_spk=False,
+                drop_whisper=False,
                 mask=mask
             )
             if cfg_strength < 1e-5:
@@ -97,11 +101,13 @@ class RF(nn.Module):
                 f0=f0, 
                 rms=rms, 
                 cvec=cvec, 
+                whisper=whisper,
                 time=t, 
-                drop_spk=True, 
+                drop_whisper=True, 
                 mask=mask
             )
             return pred + (pred - null_pred) * cfg_strength
+            #return null_pred + (pred - null_pred) * cfg_strength
 
         # Noise input
         y0 = []
@@ -139,6 +145,7 @@ class RF(nn.Module):
         f0: torch.Tensor,         # [b n]
         rms: torch.Tensor,        # [b n]
         cvec: torch.Tensor,       # [b n d]
+        whisper: torch.Tensor,    # [b n d2]
         *,
         lens: torch.Tensor | None = None,
     ):
@@ -167,7 +174,8 @@ class RF(nn.Module):
         flow = x1 - x0
 
         # unconditional guiding dropout rates
-        drop_spk = random.random() < self.spk_drop_prob
+        drop_whisper = torch.rand((batch,), device=device) < self.whisper_drop_prob
+        #drop_spk = drop_whisper & (torch.rand((batch,), device=device) < self.spk_drop_prob)  # Only allow spk drop if whisper is dropped
 
         pred = self.transformer(
             x=xt, 
@@ -175,8 +183,10 @@ class RF(nn.Module):
             f0=f0, 
             rms=rms, 
             cvec=cvec, 
+            whisper=whisper,
             time=time, 
-            drop_spk=drop_spk, 
+            #drop_spk=drop_spk, 
+            drop_whisper=drop_whisper,
             mask=mask
         )
 

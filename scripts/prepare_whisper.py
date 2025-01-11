@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-prepare_cvec.py
+prepare_whisper.py
 
 This script reads a meta-information JSON file containing speakers and their corresponding audio files,
 extracts content vectors for each audio file using a HuBERT-like model, and saves the content vectors
 as .contentvec.pt files in the same directory as the original audio files.
 
 Usage:
-    python prepare_cvec.py --data-dir DATA_DIR --model-path MODEL_PATH [OPTIONS]
+    python prepare_whisper.py --data-dir DATA_DIR --model-path MODEL_PATH [OPTIONS]
 
 Options:
     --data-dir DIRECTORY            Path to the root of the preprocessed dataset directory. (Required)
@@ -19,6 +19,7 @@ Options:
 import json
 import os
 import sys
+import math
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from pathlib import Path
@@ -33,12 +34,11 @@ import click
 from tqdm import tqdm
 import numpy as np
 
-from rift_svc.encoders import HubertModelWithFinalProj
+from rift_svc.encoders import WhisperEncoder
+from transformers import AutoFeatureExtractor
 
 
-CVEC_SAMPLE_RATE = 16000
-
-def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id=None):
+def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id=None, layer_index=-2):
     """
     Worker function to extract content vectors from a subset of audio files.
 
@@ -53,9 +53,11 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
     device = torch.device(f'cuda:{device_id}' if device_id is not None and torch.cuda.is_available() else 'cpu')
     try:
         # Load model configuration and initialize the model
-        model = HubertModelWithFinalProj.from_pretrained(model_path)
+        model = WhisperEncoder.from_pretrained(model_path)
         model = model.to(device)
         model.eval()
+
+        feature_extractor = AutoFeatureExtractor.from_pretrained(model_path)
     except Exception as e:
         queue.put(f"Error initializing model in process {current_process().name}: {e}")
         return
@@ -74,7 +76,7 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
 
         # Construct paths
         wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
-        contentvec_path = Path(data_dir) / speaker / f"{file_name}.cvec.pt"
+        whisper_path = Path(data_dir) / speaker / f"{file_name}.whisper.pt"
 
         if not wav_path.is_file():
             if verbose:
@@ -84,7 +86,7 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
         try:
             # Load audio
             waveform, sr = torchaudio.load(str(wav_path))
-            waveform = waveform.to(device)
+            info = torchaudio.info(str(wav_path))
 
             # Ensure waveform has proper shape for RMVPE (batch, samples)
             if len(waveform.shape) == 1:
@@ -92,22 +94,30 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
             elif len(waveform.shape) == 2 and waveform.shape[0] != 1:
                 # Convert to mono by averaging channels
                 waveform = waveform.mean(dim=0, keepdim=True)  # Shape: (1, samples)
+            
+            if sr != feature_extractor.sampling_rate:
+                waveform = torchaudio.functional.resample(waveform, sr, feature_extractor.sampling_rate)
+                sr = feature_extractor.sampling_rate
 
-            # Resample if necessary (assuming preprocessing handled sample rate)
-            if sr != CVEC_SAMPLE_RATE:
-                resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=CVEC_SAMPLE_RATE).to(device)
-                waveform = resampler(waveform)
+            waveform = waveform.numpy()
+
+            input_features = feature_extractor(waveform, sampling_rate=sr, return_tensors="pt", device=device, do_normalize=True)
+            input_features = {k: v.to(device) for k, v in input_features.items()}
 
             # Run the model
             with torch.no_grad():
-                contentvec = model(waveform)  # Shape: (1, seq_len, hidden_size)
-                contentvec = contentvec["last_hidden_state"].squeeze(0).cpu()  # Remove batch dimension
-
+                outputs = model(**input_features, output_hidden_states=True)  # Shape: (1, seq_len, hidden_size)
+                whisper = outputs.hidden_states[layer_index].squeeze(0).cpu()  # Remove batch dimension
+            
+            # 16000hz / hop_length 160 / conv stride 2 = 50
+            duration = info.num_frames/info.sample_rate
+            trunc_len = math.floor(duration*50)
+            whisper = whisper[:trunc_len].contiguous()
             # Save the content vector
-            torch.save(contentvec, contentvec_path)
+            torch.save(whisper, whisper_path)
 
             if verbose:
-                queue.put(f"Saved content vector: {contentvec_path} in process {current_process().name}")
+                queue.put(f"Saved Whisper Embedding: {whisper_path} in process {current_process().name}")
 
             # Send progress update
             queue.put("PROGRESS")
@@ -130,9 +140,9 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
 @click.option(
     '--model-path',
     type=click.Path(exists=True, file_okay=True, readable=True),
-    default='pretrained/content-vec-best',
+    default='pretrained/whisper-large-v3',
     show_default=True,
-    help='Path to the pre-trained HuBERT-like model file.'
+    help='Path to the pre-trained Whisper model file.'
 )
 @click.option(
     '--num-workers-per-device',
@@ -142,14 +152,21 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
     help='Number of workers per device for multiprocessing.'
 )
 @click.option(
+    '--layer-index',
+    type=int,
+    default=-2,
+    show_default=True,
+    help='Layer index to extract embeddings from. -2 for the second last layer, -1 for the last layer.'
+)
+@click.option(
     '--verbose',
     is_flag=True,
     default=False,
     help='Enable verbose output.'
 )
-def generate_contentvec(data_dir, model_path, num_workers_per_device, verbose):
+def prepare_whisper(data_dir, model_path, num_workers_per_device, layer_index, verbose):
     """
-    Generate content vectors for each audio file specified in the meta_info.json and save them as .contentvec.pt files.
+    Prepare Whisper embeddings for each audio file specified in the meta_info.json and save them as .whisper.pt files.
     """
     meta_info = Path(data_dir) / "meta_info.json"
     try:
@@ -228,7 +245,8 @@ def generate_contentvec(data_dir, model_path, num_workers_per_device, verbose):
                 model_path,
                 queue,
                 verbose,
-                device
+                device,
+                layer_index
             ),
             name=f"Process-{i}"
         )
@@ -236,13 +254,13 @@ def generate_contentvec(data_dir, model_path, num_workers_per_device, verbose):
         processes.append(p)
 
     # Initialize tqdm progress bar
-    with tqdm(total=len(all_audios), desc="Extracting Content Vectors", unit="file") as pbar:
+    with tqdm(total=len(all_audios), desc="Preparing Whisper Embeddings", unit="file") as pbar:
         completed_processes = 0
         while completed_processes < total_workers:
             message = queue.get()
             if message == "PROGRESS":
                 pbar.update(1)
-            elif message.startswith("Saved content vector") and verbose:
+            elif message.startswith("Saved Whisper Embedding") and verbose:
                 pbar.set_postfix({"Last Saved": message})
             elif message.startswith("Warning") and verbose:
                 pbar.write(message)
@@ -261,11 +279,11 @@ def generate_contentvec(data_dir, model_path, num_workers_per_device, verbose):
     for p in processes:
         p.join()
 
-    click.echo("Content vector extraction complete.")
+    click.echo("Whisper embedding preparation complete.")
 
 
 if __name__ == "__main__":
     # Set start method to spawn
     mp.set_start_method('spawn', force=True)
 
-    generate_contentvec()
+    prepare_whisper()

@@ -6,7 +6,7 @@ from librosa.filters import mel as librosa_mel_fn
 import torch
 from torch import nn
 import torch.nn.functional as F
-from transformers import HubertModel
+
 from x_transformers.x_transformers import apply_rotary_pos_emb
 
 
@@ -141,13 +141,6 @@ class RMSExtractor(nn.Module):
         rms = torch.sqrt(mean_energy)  # Shape: (batch, frames)
 
         return rms
-
-
-
-class HubertModelWithFinalProj(HubertModel):
-    def __init__(self, config):
-        super().__init__(config)
-        self.final_proj = nn.Linear(config.hidden_size, config.classifier_proj_size)
 
 
 # AdaLayerNormZero

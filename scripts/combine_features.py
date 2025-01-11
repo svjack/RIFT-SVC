@@ -73,10 +73,11 @@ def process_single_audio(audio, data_dir, verbose):
     rms_path = f"{base_path}.rms.pt"
     f0_path = f"{base_path}.f0.pt"
     cvec_path = f"{base_path}.cvec.pt"
+    whisper_path = f"{base_path}.whisper.pt"
 
     # Check if all feature files exist
     missing_files = []
-    for path in [mel_path, rms_path, f0_path, cvec_path]:
+    for path in [mel_path, rms_path, f0_path, cvec_path, whisper_path]:
         if not os.path.isfile(path):
             missing_files.append(path)
 
@@ -91,6 +92,7 @@ def process_single_audio(audio, data_dir, verbose):
         rms = torch.load(rms_path, weights_only=True)
         f0 = torch.load(f0_path, weights_only=True)
         cvec = torch.load(cvec_path, weights_only=True)
+        whisper = torch.load(whisper_path, weights_only=True)
 
         # Combine features into a single dictionary
         combined_features = {
@@ -98,6 +100,7 @@ def process_single_audio(audio, data_dir, verbose):
             'rms': rms,
             'f0': f0,
             'cvec': cvec,
+            'whisper': whisper,
         }
 
         # Save the combined features
@@ -112,6 +115,7 @@ def process_single_audio(audio, data_dir, verbose):
         os.remove(rms_path)
         os.remove(f0_path)
         os.remove(cvec_path)
+        os.remove(whisper_path)
         return True
 
     except Exception as e:

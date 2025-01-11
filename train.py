@@ -118,7 +118,7 @@ def main(cfg: DictConfig):
     rf = RF(
         transformer=transformer,
         num_mel_channels=cfg.dataset.n_mel_channels,
-        spk_drop_prob=cfg.model.get('spk_drop_prob', 0.2),
+        whisper_drop_prob=cfg.model.get('whisper_drop_prob', 0.5),
         lognorm=cfg.model.get('lognorm', True),
     )
 
