@@ -27,6 +27,9 @@ class CondEmbedding(nn.Module):
         self.cvec_embed = nn.Linear(cvec_dim, cond_dim)
         self.whisper_embed = nn.Linear(whisper_dim, cond_dim)
         self.mlp = MLP(cond_dim, cond_dim, mult = 2)
+        self.ln_cvec = nn.LayerNorm(cond_dim, elementwise_affine=False, eps=1e-6)
+        self.ln_whisper = nn.LayerNorm(cond_dim, elementwise_affine=False, eps=1e-6)
+        self.ln = nn.LayerNorm(cond_dim, elementwise_affine=True, eps=1e-6)
 
     def forward(
             self,
@@ -40,9 +43,13 @@ class CondEmbedding(nn.Module):
         if rms.ndim == 2:
             rms = rms.unsqueeze(-1)
 
-        cond = self.f0_embed(f0 / 1200) + self.rms_embed(rms) + self.cvec_embed(cvec) + self.whisper_embed(whisper)
+        f0_embed = self.f0_embed(f0 / 1200)
+        rms_embed = self.rms_embed(rms)
+        cvec_embed = self.cvec_embed(cvec)
+        whisper_embed = self.whisper_embed(whisper)
+        cond = f0_embed + rms_embed + self.ln_cvec(cvec_embed) + self.ln_whisper(whisper_embed)
         cond = self.mlp(cond) + cond
-        return cond
+        return self.ln(cond)
 
 
 # noised input audio and context mixing embedding
@@ -52,11 +59,13 @@ class InputEmbedding(nn.Module):
         self.mel_embed = nn.Linear(mel_dim, out_dim)
         self.proj = nn.Linear(2 * out_dim, out_dim)
         self.mlp = MLP(out_dim, out_dim, mult = 2)
+        self.ln = nn.LayerNorm(out_dim, elementwise_affine=False, eps=1e-6)
 
     def forward(self, x: Float[torch.Tensor, "b n d1"], cond_embed: Float[torch.Tensor, "b n d2"]):
         x = self.mel_embed(x)
         x = torch.cat((x, cond_embed), dim = -1)
         x = self.proj(x)
+        x = self.ln(x)
         x = self.mlp(x) + x
         return x
 
