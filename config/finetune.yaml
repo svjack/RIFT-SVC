@@ -26,6 +26,7 @@ training:
   warmup_ratio: 0.05
   save_per_steps: 1000
   test_per_steps: 1000
+  log_media_per_steps: 1000
   wandb_project: "RIFT-SVC-FT"
   wandb_run_name: "finetune_${model.name}_${training.max_steps}steps-lr${training.learning_rate}" 
   save_weights_only: true

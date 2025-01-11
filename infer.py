@@ -39,7 +39,7 @@ def extract_state_dict(ckpt):
 @click.option('--infer-steps', type=int, default=32, help='Number of inference steps')
 @click.option('--cfg-strength', type=float, default=0.0, help='Classifier-free guidance strength')
 @click.option('--target-loudness', type=float, default=-18.0, help='Target loudness in LUFS for normalization')
-@click.option('--restore-loudness', type=bool, default=False, help='Restore loudness to original')
+@click.option('--restore-loudness', is_flag=True, default=False, help='Restore loudness to original')
 @click.option('--interpolate-src', type=float, default=0.0, help='Interpolate source audio')
 @click.option('--fade-duration', type=float, default=20.0, help='Fade duration in milliseconds')
 def main(
@@ -122,6 +122,9 @@ def main(
     click.echo("Slicing audio...")
     segments_with_pos = slicer.slice(audio)  # Now returns list of (start_pos, chunk)
 
+    if restore_loudness:
+        click.echo(f"Will restore loudness to original")
+
     # Add these utility functions
     def apply_fade(audio, fade_samples, fade_in=True):
         """Apply fade in/out using half of a Hanning window"""
@@ -188,12 +191,12 @@ def main(
         # Generate audio
         audio_out = vocoder(mel_out.transpose(1, 2), f0)
         audio_out = audio_out.squeeze().cpu().numpy()
-        
+
         if restore_loudness:
             # Restore original loudness
             audio_out_loudness = meter.integrated_loudness(audio_out)
             audio_out = pyln.normalize.loudness(audio_out, audio_out_loudness, original_loudness)
-        
+
             # Handle clipping
             max_amp = np.max(np.abs(audio_out))
             if max_amp > 1.0:
