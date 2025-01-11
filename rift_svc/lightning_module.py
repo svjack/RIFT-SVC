@@ -27,6 +27,7 @@ class RIFTSVCLightningModule(LightningModule):
         self.cfg = cfg
         self.eval_sample_steps = cfg['training']['eval_sample_steps']
         self.eval_cfg_strength = cfg['training']['eval_cfg_strength']
+        self.log_media_per_steps = cfg['training']['log_media_per_steps']
         self.vocoder = None
 
         self.save_hyperparameters(ignore=['model', 'optimizer', 'vocoder'])
@@ -177,6 +178,8 @@ class RIFTSVCLightningModule(LightningModule):
 
     @property
     def log_media_every_n_steps(self):
+        if self.log_media_per_steps is not None:
+            return self.log_media_per_steps
         if self.save_every_n_steps is None:
             return self.trainer.val_check_interval
         return self.save_every_n_steps
