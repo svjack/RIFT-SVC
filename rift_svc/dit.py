@@ -5,6 +5,7 @@ from einops import repeat
 from jaxtyping import Bool, Float, Int
 import torch
 from torch import nn
+import torch.nn.functional as F
 from x_transformers.x_transformers import RotaryEmbedding
 
 from rift_svc.modules import (
@@ -30,6 +31,7 @@ class CondEmbedding(nn.Module):
         self.ln_cvec = nn.LayerNorm(cond_dim, elementwise_affine=False, eps=1e-6)
         self.ln_whisper = nn.LayerNorm(cond_dim, elementwise_affine=False, eps=1e-6)
         self.ln = nn.LayerNorm(cond_dim, elementwise_affine=True, eps=1e-6)
+        self.gate_linear = nn.Linear(2*cond_dim, cond_dim)
 
     def forward(
             self,
@@ -45,9 +47,10 @@ class CondEmbedding(nn.Module):
 
         f0_embed = self.f0_embed(f0 / 1200)
         rms_embed = self.rms_embed(rms)
-        cvec_embed = self.cvec_embed(cvec)
-        whisper_embed = self.whisper_embed(whisper)
-        cond = f0_embed + rms_embed + self.ln_cvec(cvec_embed) + self.ln_whisper(whisper_embed)
+        cvec_embed = self.ln_cvec(self.cvec_embed(cvec))
+        whisper_embed = self.ln_whisper(self.whisper_embed(whisper))
+        gate = F.sigmoid(self.gate_linear(torch.cat((cvec_embed, whisper_embed), dim=-1)))
+        cond = f0_embed + rms_embed + gate * cvec_embed + (1 - gate) * whisper_embed
         cond = self.mlp(cond) + cond
         return self.ln(cond)
 
