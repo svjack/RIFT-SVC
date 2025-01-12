@@ -5,6 +5,7 @@ wandb/*
 outputs/*
 ckpts/*
 mels/*
+lightning_logs/*
 
 .vscode/*
 .cache/*
@@ -17,3 +18,9 @@ mels/*
 *.wav
 *.mp3
 *.flac
+*.csv
+
+clean_spk.py
+upload.py
+test*.py
+viz*.py
