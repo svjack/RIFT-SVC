@@ -74,7 +74,7 @@ class RIFTSVCLightningModule(LightningModule):
         self.snr = []
         self.mse = []
 
-    def on_validation_end(self):
+    def on_validation_end(self, log=True):
         self.optimizer.train()
         if not self.trainer.is_global_zero:
             return
@@ -91,10 +91,11 @@ class RIFTSVCLightningModule(LightningModule):
             'val/snr': np.mean(self.snr),
             'val/mse': np.mean(self.mse)
         }
-        self.logger.experiment.log(metrics, step=self.global_step)
+        if log:
+            self.logger.experiment.log(metrics, step=self.global_step)
 
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, log=True):
         if not self.trainer.is_global_zero:
             return
         
@@ -144,31 +145,41 @@ class RIFTSVCLightningModule(LightningModule):
             self.snr.append(snr(mel_gen_i, mel_gt_i).cpu().item())
             self.mse.append(F.mse_loss(mel_gen_i, mel_gt_i).cpu().item())
 
-            os.makedirs('.cache', exist_ok=True)
-            if global_step % log_media_every_n_steps == 0:
-                torchaudio.save(f".cache/{sample_idx}_gen.wav", wav_gen.cpu().to(torch.float32), 44100)
-                self.logger.experiment.log({
-                    f"val-audio/{sample_idx}_gen": wandb.Audio(f".cache/{sample_idx}_gen.wav", sample_rate=44100),
-                }, step=self.global_step)
-            
-            if global_step == 0:
-                torchaudio.save(f".cache/{sample_idx}_gt.wav", wav_gt.cpu().to(torch.float32), 44100)
-                self.logger.experiment.log({
-                    f"val-audio/{sample_idx}_gt": wandb.Audio(f".cache/{sample_idx}_gt.wav", sample_rate=44100)
-                }, step=self.global_step)
+            if log:
+                os.makedirs('.cache', exist_ok=True)
+                if global_step % log_media_every_n_steps == 0:
+                    torchaudio.save(f".cache/{sample_idx}_gen.wav", wav_gen.cpu().to(torch.float32), 44100)
+                    self.logger.experiment.log({
+                        f"val-audio/{sample_idx}_gen": wandb.Audio(f".cache/{sample_idx}_gen.wav", sample_rate=44100),
+                    }, step=self.global_step)
+                
+                if global_step == 0:
+                    torchaudio.save(f".cache/{sample_idx}_gt.wav", wav_gt.cpu().to(torch.float32), 44100)
+                    self.logger.experiment.log({
+                        f"val-audio/{sample_idx}_gt": wandb.Audio(f".cache/{sample_idx}_gt.wav", sample_rate=44100)
+                    }, step=self.global_step)
 
-            if global_step % log_media_every_n_steps == 0:
-                # Compute global min and max for consistent scaling across all plots
-                data_gt = mel_gt_i.squeeze().T.cpu().numpy()
-                data_gen = mel_gen_i.squeeze().T.cpu().numpy()
-                data_abs_diff = data_gen - data_gt
+                if global_step % log_media_every_n_steps == 0:
+                    # Compute global min and max for consistent scaling across all plots
+                    data_gt = mel_gt_i.squeeze().T.cpu().numpy()
+                    data_gen = mel_gen_i.squeeze().T.cpu().numpy()
+                    data_abs_diff = data_gen - data_gt
 
-                cache_path = f".cache/{sample_idx}_mel.jpg"
-                draw_mel_specs(data_gt, data_gen, data_abs_diff, cache_path)
+                    cache_path = f".cache/{sample_idx}_mel.jpg"
+                    draw_mel_specs(data_gt, data_gen, data_abs_diff, cache_path)
 
-                self.logger.experiment.log({
-                    f"val-mel/{sample_idx}_mel": wandb.Image(cache_path)
-                }, step=self.global_step)
+                    self.logger.experiment.log({
+                        f"val-mel/{sample_idx}_mel": wandb.Image(cache_path)
+                    }, step=self.global_step)
+    
+    def on_test_start(self):
+        self.on_validation_start()
+    
+    def on_test_end(self):
+        self.on_validation_end(log=False)
+
+    def test_step(self, batch, batch_idx):
+        self.validation_step(batch, batch_idx, log=False)
 
     def on_before_optimizer_step(self, optimizer):
         # Calculate gradient norm
