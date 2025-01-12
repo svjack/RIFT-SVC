@@ -24,7 +24,7 @@ class RF(nn.Module):
             method='euler'
         ),
         #spk_drop_prob: float = 0.2,
-        whisper_drop_prob: float = 0.5,
+        whisper_drop_prob: float = 0.2,
         num_mel_channels: int | None = 128,
         lognorm: bool = False,
     ):
@@ -80,21 +80,6 @@ class RF(nn.Module):
 
         # Define the ODE function
         def fn(t, x):
-            # Predict flow
-            pred = self.transformer(
-                x=x, 
-                spk=spk_id, 
-                f0=f0, 
-                rms=rms, 
-                cvec=cvec, 
-                whisper=whisper,
-                time=t, 
-                drop_whisper=False,
-                mask=mask
-            )
-            if cfg_strength < 1e-5:
-                return pred
-            
             null_pred = self.transformer(
                 x=x, 
                 spk=spk_id, 
@@ -106,8 +91,23 @@ class RF(nn.Module):
                 drop_whisper=True, 
                 mask=mask
             )
-            return pred + (pred - null_pred) * cfg_strength
-            #return null_pred + (pred - null_pred) * cfg_strength
+            if cfg_strength < 1e-5:
+                return null_pred
+
+            pred = self.transformer(
+                x=x, 
+                spk=spk_id, 
+                f0=f0, 
+                rms=rms, 
+                cvec=cvec, 
+                whisper=whisper,
+                time=t, 
+                drop_whisper=False,
+                mask=mask
+            )
+
+            #return pred + (pred - null_pred) * cfg_strength
+            return null_pred + (pred - null_pred) * cfg_strength
 
         # Noise input
         y0 = []
