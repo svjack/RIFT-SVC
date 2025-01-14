@@ -4,6 +4,9 @@
 
  Implementation of **RIFT-SVC**, a singing voice conversion model based on Rectified Flow Transformer. We tested several architecture-wise and training-wise improvements over vanilla Diffusion Transformer.
 
+## News
+- 2025-01-14: V2.0 is released. The cfg-strength can now be used to control the balance between timbre and articulation.
+- 2024-12-30: V1.0 is released.
 
 ---
 ## Environment Preparation
