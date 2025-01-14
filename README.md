@@ -73,9 +73,10 @@ or do it manually for the settings you want.
 
 To extract features, run:
 ```bash
-bash prepare.sh
+bash prepare.sh data/finetune 1
 ```
-You can adjust the DATA_DIR in `prepare.sh` to your own data directory. We use `data/finetune` by default.
+where `1` is the number of workers per device. You can adjust this value based on your GPU memory (like 4 for 3090).
+
 
 ## Training
 
@@ -112,7 +113,16 @@ Since we use hydra to manage the config, you can also override the config file b
 
 The above settings are tested on one 3090 GPU, consuming ~20GB VRAM.
 
+### Resume from checkpoint
+If you expect to resume training from a checkpoint, you can add the following argument:
+```bash
+[other arguments] +training.save_weights_only=False
+```
 
+Then, you can resume training from a checkpoint later by adding the following argument:
+```bash
+[other arguments] +training.resume_from_checkpoint=/path/to/checkpoint.ckpt +training.wandb_resume_id=your_wandb_run_id
+```
 
 ## Inference
 
