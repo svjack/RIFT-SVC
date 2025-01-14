@@ -1,6 +1,11 @@
 import numpy as np
 import warnings
+import logging
 warnings.filterwarnings('ignore')
+
+# Configure logging at the top of your slicer.py
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # This function is obtained from librosa.
 def get_rms(
@@ -73,19 +78,21 @@ class Slicer:
         start_idx = max(0, start_idx)
         end_idx = min(len(samples), end_idx)
         
+        logger.debug(f"_find_zero_crossing called with start_idx={start_idx}, end_idx={end_idx}, direction={direction}")
+
         if direction == 'forward':
             search_range = range(start_idx, end_idx - 1)
         else:  # backward
-            search_range = range(end_idx - 1, start_idx, -1)
+            search_range = range(end_idx - 2, start_idx - 1, -1)
             
         for i in search_range:
             if samples[i] * samples[i + 1] <= 0:  # Zero crossing found
                 # Determine which point is closer to zero
-                if abs(samples[i]) < abs(samples[i + 1]):
-                    return i
-                else:
-                    return i + 1
-                    
+                closer_point = i if abs(samples[i]) < abs(samples[i + 1]) else i + 1
+                logger.debug(f"Zero crossing found at index {closer_point}")
+                return closer_point
+
+        logger.debug("No zero crossing found in the specified range.")
         return start_idx if direction == 'forward' else end_idx - 1
 
     def _find_best_cut_point(self, waveform, frame_idx, is_start=False):

@@ -42,7 +42,7 @@ python pretrained/download.py
 
 | Model | Command |
 | --- | --- |
-| pretrain-v3-final_dit-768-12_300000steps-lr0.0003 | wget https://huggingface.co/Pur1zumu/RIFT-SVC-pretrained/resolve/main/pretrain-v3-final_dit-768-12_300000steps-lr0.0003.ckpt -O pretrained/pretrain-v3-final_dit-768-12_300000steps-lr0.0003.ckpt |
+| pretrain-v2-final_dit-768-12_300000steps-lr0.0003 | wget https://huggingface.co/Pur1zumu/RIFT-SVC-pretrained/resolve/main/pretrain-v2-final_dit-768-12_300000steps-lr0.0003.ckpt -O pretrained/pretrain-v2-final_dit-768-12_300000steps-lr0.0003.ckpt |
 
 
 #### 7. Prepare data and extract features.
@@ -84,14 +84,9 @@ wandb login
 ```
 You can find the training logs in the wandb dashboard. See [wandb](https://wandb.ai/) for more details.
 
-If one speaker is used, an example command is:
+Run the following command to start fine-tuning:
 ```bash
-python train.py --config-name finetune model=dit-768-12 training.wandb_run_name=finetune_ckpt-v3_dit-768-12_30000steps-lr0.00005 training.learning_rate=5e-5 +model.lognorm=true training.max_steps=30000 training.weight_decay=0.01 training.batch_size_per_gpu=64 training.save_per_steps=1000 training.test_per_steps=1000 +model.pretrained_path=pretrained/pretrain-v3-final_dit-768-12_300000steps-lr0.0003.ckpt +model.spk_drop_prob=0.0 training.eval_cfg_strength=0.0
-```
-
-If multiple speakers are used:
-```bash
-python train.py --config-name finetune model=dit-768-12 training.wandb_run_name=finetune_ckpt-v3_dit-768-12_30000steps-lr0.00005 training.learning_rate=5e-5 +model.lognorm=true training.max_steps=30000 training.weight_decay=0.01 training.batch_size_per_gpu=64 training.save_per_steps=1000 training.test_per_steps=1000 +model.pretrained_path=pretrained/pretrain-v3-final_dit-768-12_300000steps-lr0.0003.ckpt +model.spk_drop_prob=0.2 training.eval_cfg_strength=2.0
+python train.py --config-name finetune model=dit-768-12 training.wandb_run_name=finetune_ckpt-v2_dit-768-12_30000steps-lr0.00005 training.learning_rate=5e-5 +model.lognorm=true training.max_steps=30000 training.weight_decay=0.01 training.batch_size_per_gpu=64 training.save_per_steps=1000 training.test_per_steps=1000 +model.pretrained_path=pretrained/pretrain-v2-final_dit-768-12_300000steps-lr0.0003.ckpt +model.whisper_drop_prob=0.2 training.eval_cfg_strength=2.0
 ```
 
 **Arguments:**
@@ -106,8 +101,8 @@ python train.py --config-name finetune model=dit-768-12 training.wandb_run_name=
 - `--training.save_per_steps`: The frequency of saving checkpoints.
 - `--training.test_per_steps`: The frequency of testing.
 - `--model.pretrained_path`: The path to the pretrained model.
-- `--model.spk_drop_prob`: The probability of dropping out the speaker embedding. (Only used for multiple speakers fine-tuning)
-- `--training.eval_cfg_strength`: The strength of classifier-free guidance for evaluation. (Only used for multiple speakers fine-tuning)
+- `--model.whisper_drop_prob`: The probability of dropping out the whisper embedding.
+- `--training.eval_cfg_strength`: The strength of classifier-free guidance for evaluation.
 - `--training.eval_sample_steps`: The number of inference steps to sample for evaluation.
 
 Since we use hydra to manage the config, you can also override the config file by adding your own arguments.
@@ -116,13 +111,11 @@ The above settings are tested on one 3090 GPU, consuming ~20GB VRAM.
 
 
 
-
-
 ## Inference
 
 #### 9. Inference
 ```bash
-python infer.py --model ckpts/finetune_ckpt-v3_dit-768-12_30000steps-lr0.00005/model-step=24000.ckpt --input 0.wav --output 0_steps32_cfg0.wav --speaker speaker1 --infer-steps 32 --cfg-strength 0.0
+python infer.py --model ckpts/finetune_ckpt-v2_dit-768-12_30000steps-lr0.00005/model-step=24000.ckpt --input 0.wav --output 0_steps32_cfg0.wav --speaker speaker1 --infer-steps 32 --cfg-strength 2.0
 ```
 
 **Arguments:**
@@ -132,14 +125,26 @@ Arguments:
 - `--output`: The path to the output audio file.
 - `--speaker`: The speaker name.
 - `--infer-steps`: The number of inference steps.
-- `--cfg-strength`: The strength of classifier-free guidance. If the model is trained with single speaker, you should set this to 0.0.
+- `--cfg-strength`: The strength of classifier-free guidance. A lower value (such as 0) produces a timbre closer to the target speaker, but with relatively less clear articulation and lower noise resistance. A higher value (such as 5) produces clearer articulation and better noise resistance, but the style will be closer to the input source. We set a balance value of 2.0 by default.
 
-For 768-12 model, the VRAM consumption is ~4GB.
+For 768-12 model, the VRAM consumption is ~5GB.
 
 ---
 
 ## Key Technical Details
 
+### V2
+#### Major Gains
+- Add whisper encoder[9]
+- Add classifier-free guidance training by randomly dropping out the whisper embedding
+- Add classifier-free guidance inference by f(cvec, null) + cfg_strength * (f(cvec, speaker) - f(cvec, null)) in each sample step
+    - Note that this is different from the original classifier-free guidance in Diffusion Transformer, which is f(condition) + cfg_strength * (f(condition) - f(null))
+- Add post-LayerNorm at appropriate positions in the input embedding module
+
+#### Minor Gains
+- Add gating module for contentvec embedding and whisper embedding
+
+### V1
 #### Major Gains
 
 - NSF-HIFIGAN[1] instead of BigVGAN[2]
@@ -151,7 +156,7 @@ For 768-12 model, the VRAM consumption is ~4GB.
 
 - LogNorm noise scheduler[6]
 - Zero init for output blocks
-- Classifier-free guidance training by randomly dropping out the speaker embedding (no quantitative test yet, but theoretically it should be better. But it not works for single speaker training.)
+- Classifier-free guidance training by randomly dropping out the speaker embedding (no quantitative test yet, but theoretically it should be better. But it not works for single speaker training.) [Removed in V2]
 - Add an MLP for input condition embedding
 
 #### No Gains
@@ -176,3 +181,5 @@ For 768-12 model, the VRAM consumption is ~4GB.
 [7] UNet-like skip connections: Bao, F., Nie, S., Xue, K., Cao, Y., Li, C., Su, H., & Zhu, J. (2023). All are worth words: A vit backbone for diffusion models. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition (pp. 22669-22679).
 
 [8] MuP: Yang, G., Hu, E. J., Babuschkin, I., Sidor, S., Liu, X., Farhi, D., ... & Gao, J. (2022). Tensor programs v: Tuning large neural networks via zero-shot hyperparameter transfer. arXiv preprint arXiv:2203.03466.
+
+[9] Whisper encoder: https://huggingface.co/openai/whisper-large-v3

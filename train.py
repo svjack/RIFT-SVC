@@ -41,9 +41,15 @@ class CustomProgressBar(TQDMProgressBar):
         remaining_steps = total_steps - current_step
         remaining_time = average_step_time * remaining_steps if total_steps > 0 else 0
 
-        # Format times to hh:mm:ss
-        elapsed_time_str = time.strftime('%H:%M:%S', time.gmtime(elapsed_time))
-        remaining_time_str = time.strftime('%H:%M:%S', time.gmtime(remaining_time))
+        # Format times with no leading zeros for hours
+        def format_time(seconds):
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            seconds = int(seconds % 60)
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+        elapsed_time_str = format_time(elapsed_time)
+        remaining_time_str = format_time(remaining_time)
 
         # Update the progress bar with loss, elapsed time, remaining time, and remaining steps
         self.train_progress_bar.set_postfix({
@@ -118,7 +124,7 @@ def main(cfg: DictConfig):
     rf = RF(
         transformer=transformer,
         num_mel_channels=cfg.dataset.n_mel_channels,
-        whisper_drop_prob=cfg.model.get('whisper_drop_prob', 0.5),
+        whisper_drop_prob=cfg.model.get('whisper_drop_prob', 0.2),
         lognorm=cfg.model.get('lognorm', True),
     )
 

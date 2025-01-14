@@ -2,18 +2,23 @@ import torch
 import torchaudio
 import click
 import numpy as np
+import math
 from pathlib import Path
 import pyloudnorm as pyln
 from tqdm import tqdm
+from transformers import AutoFeatureExtractor
 
 from rift_svc.nsf_hifigan import NsfHifiGAN
 from rift_svc.rmvpe import RMVPE
-from rift_svc.modules import get_mel_spectrogram, RMSExtractor, HubertModelWithFinalProj
+from rift_svc.modules import get_mel_spectrogram, RMSExtractor
+from rift_svc.encoders import WhisperEncoder, HubertModelWithFinalProj
 from rift_svc.utils import post_process_f0, interpolate_tensor
 from rift_svc import RF, DiT
 
 from slicer import Slicer
 
+
+torch.set_grad_enabled(False)
 
 
 def extract_state_dict(ckpt):
@@ -87,6 +92,8 @@ def main(
     rmvpe = RMVPE(model_path="pretrained/rmvpe/model.pt", hop_length=160, device=device)
     hubert = HubertModelWithFinalProj.from_pretrained("pretrained/content-vec-best").to(device)
     rms_extractor = RMSExtractor(hop_length=hop_length).to(device)
+    whisper_encoder = WhisperEncoder.from_pretrained("pretrained/whisper-large-v3").to(device)
+    whisper_feature_extractor = AutoFeatureExtractor.from_pretrained("pretrained/whisper-large-v3")
 
     # Load and preprocess input audio
     click.echo("Loading audio...")
@@ -110,7 +117,7 @@ def main(
     )
 
     # Initialize Loudness Meter
-    meter = pyln.Meter(sample_rate)  # Create BS.1770 meter
+    meter = pyln.Meter(sample_rate, block_size=0.1)  # Create BS.1770 meter
 
     crossfade_ms = 40  # crossfade length in milliseconds
     crossfade_size = int(crossfade_ms * sample_rate / 1000)  # convert to samples
@@ -165,7 +172,15 @@ def main(
             
             cvec = hubert(audio_16khz)["last_hidden_state"].squeeze(0)
             cvec = interpolate_tensor(cvec, mel.shape[1])[None, :]
-            
+
+            input_features = whisper_feature_extractor(audio_16khz.cpu().numpy(), sampling_rate=16000, return_tensors="pt", device=device, do_normalize=True)
+            input_features = {k: v.to(device) for k, v in input_features.items()}
+            whisper_outputs = whisper_encoder(**input_features, output_hidden_states=True)
+            trunc_len = math.floor((audio_16khz.shape[1] / 16000)*50)
+            whisper = whisper_outputs.hidden_states[-2][0, :trunc_len]
+            whisper = interpolate_tensor(whisper, mel.shape[1])[None, :]
+
+
             f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
             f0 = post_process_f0(f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
             if key_shift != 0:
@@ -182,6 +197,7 @@ def main(
             f0=f0,
             rms=rms,
             cvec=cvec,
+            whisper=whisper,
             steps=infer_steps,
             cfg_strength=cfg_strength,
             interpolate_condition=True if interpolate_src > 0 else False,
