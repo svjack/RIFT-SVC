@@ -148,7 +148,7 @@ For 768-12 model, the VRAM consumption is ~5GB.
 
 ### V2
 #### Major Gains
-- Add whisper encoder[9]
+- Add whisper encoder[9] and use the hidden state from the second last layer to reduce timbre leakage, as explored in [10]
 - Add classifier-free guidance training by randomly dropping out the whisper embedding
 - Add classifier-free guidance inference by f(cvec, null) + cfg_strength * (f(cvec, speaker) - f(cvec, null)) in each sample step
     - Note that this is different from the original classifier-free guidance in Diffusion Transformer, which is f(condition) + cfg_strength * (f(condition) - f(null))
@@ -196,3 +196,5 @@ For 768-12 model, the VRAM consumption is ~5GB.
 [8] MuP: Yang, G., Hu, E. J., Babuschkin, I., Sidor, S., Liu, X., Farhi, D., ... & Gao, J. (2022). Tensor programs v: Tuning large neural networks via zero-shot hyperparameter transfer. arXiv preprint arXiv:2203.03466.
 
 [9] Whisper encoder: https://huggingface.co/openai/whisper-large-v3
+
+[10] Zhang, Li, et al. "Whisper-SV: Adapting Whisper for low-data-resource speaker verification." Speech Communication 163 (2024): 103103.
