@@ -152,7 +152,7 @@ For 768-12 model, the VRAM consumption is ~5GB.
 - Add classifier-free guidance training by randomly dropping out the whisper embedding
 - Add classifier-free guidance inference by f(cvec, null) + cfg_strength * (f(cvec, speaker) - f(cvec, null)) in each sample step
     - Note that this is different from the original classifier-free guidance in Diffusion Transformer, which is f(condition) + cfg_strength * (f(condition) - f(null))
-- Add post-LayerNorm at appropriate positions in the input embedding module
+- Add post-LayerNorm at appropriate positions in the input embedding module [11]
 
 #### Minor Gains
 - Add gating module for contentvec embedding and whisper embedding
@@ -198,3 +198,5 @@ For 768-12 model, the VRAM consumption is ~5GB.
 [9] Whisper encoder: https://huggingface.co/openai/whisper-large-v3
 
 [10] Zhang, Li, et al. "Whisper-SV: Adapting Whisper for low-data-resource speaker verification." Speech Communication 163 (2024): 103103.
+
+[11] Li, Pengxiang, Lu Yin, and Shiwei Liu. "Mix-LN: Unleashing the Power of Deeper Layers by Combining Pre-LN and Post-LN." arXiv preprint arXiv:2412.13795 (2024).
