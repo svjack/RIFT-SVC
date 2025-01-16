@@ -78,7 +78,11 @@ class Slicer:
         start_idx = max(0, start_idx)
         end_idx = min(len(samples), end_idx)
         
-        logger.debug(f"_find_zero_crossing called with start_idx={start_idx}, end_idx={end_idx}, direction={direction}")
+        # Convert indices to time (in seconds)
+        start_time = start_idx / self.sr
+        end_time = end_idx / self.sr
+        
+        logger.debug(f"_find_zero_crossing called with start_idx={start_idx} ({start_time:.3f}s), end_idx={end_idx} ({end_time:.3f}s), direction={direction}")
 
         if direction == 'forward':
             search_range = range(start_idx, end_idx - 1)
