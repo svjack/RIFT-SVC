@@ -67,7 +67,7 @@ class RF(nn.Module):
         # sway_sampling_coef: float | None = None,
         seed: int | None = None,
         interpolate_condition: bool = False,
-        t_inter: float = 0.1,
+        t_inter: float = 0.0,
     ):
         self.eval()
 
@@ -114,7 +114,7 @@ class RF(nn.Module):
         for _ in range(batch):
             if exists(seed):
                 torch.manual_seed(seed)
-            y0.append(torch.randn(cvec.shape[1], self.num_mel_channels, device=self.device))
+            y0.append(torch.randn(mel_seq_len, self.num_mel_channels, device=self.device))
         y0 = pad_sequence(y0, padding_value=0, batch_first=True)
 
         t_start = 0
@@ -174,8 +174,12 @@ class RF(nn.Module):
         flow = x1 - x0
 
         # unconditional guiding dropout rates
-        drop_whisper = torch.rand((batch,), device=device) < self.whisper_drop_prob
-        #drop_spk = drop_whisper & (torch.rand((batch,), device=device) < self.spk_drop_prob)  # Only allow spk drop if whisper is dropped
+        #drop_whisper = torch.rand((batch,), device=device) < self.whisper_drop_prob
+        # Drop a fixed proportion of the batch
+        num_to_drop = int(batch * self.whisper_drop_prob)
+        drop_indices = torch.randperm(batch, device=device)[:num_to_drop]
+        drop_whisper = torch.zeros(batch, dtype=torch.bool, device=device)
+        drop_whisper[drop_indices] = True
 
         pred = self.transformer(
             x=xt, 
@@ -185,7 +189,6 @@ class RF(nn.Module):
             cvec=cvec, 
             whisper=whisper,
             time=time, 
-            #drop_spk=drop_spk, 
             drop_whisper=drop_whisper,
             mask=mask
         )
