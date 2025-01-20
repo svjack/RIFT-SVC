@@ -1,11 +1,12 @@
 import gc
 import os
-
 import numpy as np
 import torch
 import torch.nn.functional as F
 import torchaudio
 import wandb
+import librosa
+
 from pytorch_lightning import LightningModule
 
 from rift_svc.metrics import mcd, psnr, si_snr, snr
@@ -28,8 +29,10 @@ class RIFTSVCLightningModule(LightningModule):
         self.eval_sample_steps = cfg['training']['eval_sample_steps']
         self.eval_cfg_strength = cfg['training']['eval_cfg_strength']
         self.log_media_per_steps = cfg['training']['log_media_per_steps']
-        self.vocoder = None
+        self.eval_spk_sim = cfg['training'].get('eval_spk_sim', False)
 
+        self.vocoder = None
+        self.spk_encoder = None
         self.save_hyperparameters(ignore=['model', 'optimizer', 'vocoder'])
 
     def configure_optimizers(self):
@@ -44,7 +47,7 @@ class RIFTSVCLightningModule(LightningModule):
         whisper = batch['whisper']
         frame_lens = batch['frame_lens']
 
-        loss, pred = self.model(
+        loss, _ = self.model(
             mel_spec,
             spk_id=spk_id,
             f0=f0,
@@ -54,8 +57,9 @@ class RIFTSVCLightningModule(LightningModule):
             lens=frame_lens,
         )
 
-        self.log('train/loss', loss, prog_bar=True, logger=True)
-        return loss
+        for k, v in loss.items():
+            self.log(f'train/{k}', v, prog_bar=True, logger=True)
+        return loss['loss']
     
     def on_validation_start(self):
         self.optimizer.eval()
@@ -74,13 +78,27 @@ class RIFTSVCLightningModule(LightningModule):
         self.snr = []
         self.mse = []
 
+        if self.eval_spk_sim:
+            if self.spk_encoder is None:
+                self.spk_encoder = torch.jit.load('pretrained/ecapa2.pt', map_location='cpu').to(self.device)
+            else:
+                self.spk_encoder = self.spk_encoder.to(self.device)
+
+            self.spk_sim = []
+
+
     def on_validation_end(self, log=True):
         self.optimizer.train()
         if not self.trainer.is_global_zero:
             return
 
-        if hasattr(self, 'vocoder'):
+        if self.vocoder is not None:
             self.vocoder = self.vocoder.cpu()
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        if self.spk_encoder is not None:
+            self.spk_encoder = self.spk_encoder.cpu()
             gc.collect()
             torch.cuda.empty_cache()
         
@@ -91,6 +109,10 @@ class RIFTSVCLightningModule(LightningModule):
             'val/snr': np.mean(self.snr),
             'val/mse': np.mean(self.mse)
         }
+
+        if self.eval_spk_sim:
+            metrics['val/spk_sim'] = np.mean(self.spk_sim)
+
         if log:
             self.logger.experiment.log(metrics, step=self.global_step)
 
@@ -124,14 +146,55 @@ class RIFTSVCLightningModule(LightningModule):
         mel_gen = mel_gen.float()
         mel_gt = mel_gt.float()
 
+        if self.eval_spk_sim:
+            target_spk_id = torch.roll(spk_id, shifts=-1, dims=0)
+            target_mel_gen, _ = self.model.sample(
+                src_mel=mel_gt,
+                spk_id=target_spk_id,
+                f0=f0,
+                rms=rms,
+                cvec=cvec,
+                whisper=whisper,
+                frame_lens=frame_lens,
+                steps=self.eval_sample_steps,
+                cfg_strength=self.eval_cfg_strength,
+            )
+            target_mel_gen = target_mel_gen.float()
+
         for i in range(mel_gen.shape[0]):
+            sample_idx = batch_idx * mel_gen.shape[0] + i
             wav_gen = self.vocoder(mel_gen[i:i+1, :frame_lens[i], :].transpose(1, 2), f0[i:i+1, :frame_lens[i]])
             wav_gt = self.vocoder(mel_gt[i:i+1, :frame_lens[i], :].transpose(1, 2), f0[i:i+1, :frame_lens[i]])
 
             wav_gen = wav_gen.squeeze(0)
             wav_gt = wav_gt.squeeze(0)
 
-            sample_idx = batch_idx * mel_gen.shape[0] + i
+            if self.eval_spk_sim:
+                target_wav_gen = self.vocoder(target_mel_gen[i:i+1, :frame_lens[i], :].transpose(1, 2), f0[i:i+1, :frame_lens[i]])
+                target_wav_gen = target_wav_gen.squeeze(0)
+
+                wav_sr = self.vocoder.h.sampling_rate
+
+                # **Add Low-Pass Filtering Before Resampling using librosa**
+                # Convert tensors to NumPy arrays
+                target_wav_gen_np = target_wav_gen.float().cpu().numpy()
+                wav_gt_np = wav_gt.float().cpu().numpy()
+
+                # Apply low-pass filtering and resample to 16000 Hz
+                target_wav_16khz_np = librosa.resample(target_wav_gen_np, orig_sr=wav_sr, target_sr=16000)
+                wav_gt_16khz_np = librosa.resample(wav_gt_np, orig_sr=wav_sr, target_sr=16000)
+
+                # Convert back to torch tensors
+                target_wav_16khz = torch.from_numpy(target_wav_16khz_np).to(target_wav_gen.device)
+                wav_gt_16khz = torch.from_numpy(wav_gt_16khz_np).to(wav_gt.device)
+
+                spk_embs = self.spk_encoder(wav_gt_16khz)
+                spk_embs = torch.roll(spk_embs, shifts=-1, dims=0)
+                target_spk_embs = self.spk_encoder(target_wav_16khz)
+
+                spk_sim = torch.cosine_similarity(spk_embs, target_spk_embs, dim=-1)
+                self.spk_sim.append(spk_sim.cpu().item())
+
             mel_gen_i = get_mel_spectrogram(wav_gen).transpose(1, 2)
             mel_gt_i = get_mel_spectrogram(wav_gt).transpose(1, 2)
 
@@ -148,16 +211,23 @@ class RIFTSVCLightningModule(LightningModule):
             if log:
                 os.makedirs('.cache', exist_ok=True)
                 if global_step % log_media_every_n_steps == 0:
-                    torchaudio.save(f".cache/{sample_idx}_gen.wav", wav_gen.cpu().to(torch.float32), 44100)
+                    torchaudio.save(f".cache/spk-{spk_id[i].item()}_{sample_idx}_gen.wav", wav_gen.cpu().to(torch.float32), 44100)
                     self.logger.experiment.log({
-                        f"val-audio/{sample_idx}_gen": wandb.Audio(f".cache/{sample_idx}_gen.wav", sample_rate=44100),
+                        f"val-audio/spk-{spk_id[i].item()}_{sample_idx}-gen": wandb.Audio(f".cache/spk-{spk_id[i].item()}_{sample_idx}_gen.wav", sample_rate=44100),
                     }, step=self.global_step)
+
+                    if self.eval_spk_sim:
+                        torchaudio.save(f".cache/spk-{target_spk_id[i].item()}_{sample_idx}_converted.wav", target_wav_gen.cpu().to(torch.float32), 44100)
+                        self.logger.experiment.log({
+                            f"val-audio-converted/spk-{target_spk_id[i].item()}_{sample_idx}": wandb.Audio(f".cache/spk-{target_spk_id[i].item()}_{sample_idx}_converted.wav", sample_rate=44100)
+                        }, step=self.global_step)
                 
                 if global_step == 0:
-                    torchaudio.save(f".cache/{sample_idx}_gt.wav", wav_gt.cpu().to(torch.float32), 44100)
+                    torchaudio.save(f".cache/spk-{spk_id[i].item()}_{sample_idx}_gt.wav", wav_gt.cpu().to(torch.float32), 44100)
                     self.logger.experiment.log({
-                        f"val-audio/{sample_idx}_gt": wandb.Audio(f".cache/{sample_idx}_gt.wav", sample_rate=44100)
+                        f"val-audio/spk-{spk_id[i].item()}_{sample_idx}-gt": wandb.Audio(f".cache/spk-{spk_id[i].item()}_{sample_idx}_gt.wav", sample_rate=44100)
                     }, step=self.global_step)
+
 
                 if global_step % log_media_every_n_steps == 0:
                     # Compute global min and max for consistent scaling across all plots
