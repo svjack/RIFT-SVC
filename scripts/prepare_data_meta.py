@@ -97,6 +97,10 @@ def perform_stratified_split(speaker_to_files, num_test_per_speaker, seed, only_
         "gtsinger-IT",
         "gtsinger-KO",
         "gtsinger-RU"
+    ] + [
+        "Tenor",
+        "Bass",
+        "ManRaw"
     ]
 
     if only_include_speakers:
