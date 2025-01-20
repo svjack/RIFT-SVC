@@ -35,7 +35,7 @@ from rift_svc.rmvpe.inference import RMVPE
 from rift_svc.utils import post_process_f0
 
 
-def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, queue, verbose, device_id=0):
+def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, queue, verbose, device_id=0, overwrite=False):
     """
     Worker function to extract f0 from a subset of audio files.
 
@@ -48,6 +48,7 @@ def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, 
         queue (Queue): Multiprocessing queue to communicate progress.
         verbose (bool): If True, enable verbose output.
         device_id (int): CUDA device ID.
+        overwrite (bool): If True, overwrite existing f0 files.
     """
     device = torch.device(f'cuda:{device_id}' if torch.cuda.is_available() else 'cpu')
     try:
@@ -69,6 +70,12 @@ def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, 
         # Construct paths
         wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
         f0_path = Path(data_dir) / speaker / f"{file_name}.f0.pt"
+
+        if f0_path.is_file() and not overwrite:
+            if verbose:
+                queue.put(f"Skipping existing f0 file: {f0_path} in process {current_process().name}")
+            queue.put("PROGRESS")
+            continue
 
         if not wav_path.is_file():
             if verbose:
@@ -158,12 +165,18 @@ def worker_process(audio_subset, data_dir, model_path, hop_length, sample_rate, 
     help='Number of workers per device for multiprocessing.'
 )
 @click.option(
+    '--overwrite',
+    is_flag=True,
+    default=False,
+    help='Overwrite existing f0 files.'
+)
+@click.option(
     '--verbose',
     is_flag=True,
     default=False,
     help='Enable verbose output.'
 )
-def generate_f0(data_dir, model_path, hop_length, sample_rate, num_workers_per_device, verbose):
+def generate_f0(data_dir, model_path, hop_length, sample_rate, num_workers_per_device, verbose, overwrite):
     """
     Generate f0 for each audio file specified in the meta_info.json and save them as .f0.pt files.
     """
@@ -245,7 +258,8 @@ def generate_f0(data_dir, model_path, hop_length, sample_rate, num_workers_per_d
                 sample_rate,
                 queue,
                 verbose,
-                device
+                device,
+                overwrite
             ),
             name=f"Process-{i}"
         )

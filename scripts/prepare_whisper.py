@@ -38,7 +38,7 @@ from rift_svc.encoders import WhisperEncoder
 from transformers import AutoFeatureExtractor
 
 
-def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id=None, layer_index=-2):
+def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id=None, layer_index=-2, overwrite=False):
     """
     Worker function to extract content vectors from a subset of audio files.
 
@@ -77,6 +77,12 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
         # Construct paths
         wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
         whisper_path = Path(data_dir) / speaker / f"{file_name}.whisper.pt"
+
+        if whisper_path.is_file() and not overwrite:
+            if verbose:
+                queue.put(f"Skipping existing Whisper embedding: {whisper_path} in process {current_process().name}")
+            queue.put("PROGRESS")
+            continue
 
         if not wav_path.is_file():
             if verbose:
@@ -159,12 +165,18 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
     help='Layer index to extract embeddings from. -2 for the second last layer, -1 for the last layer.'
 )
 @click.option(
+    '--overwrite',
+    is_flag=True,
+    default=False,
+    help='Overwrite existing Whisper embeddings.'
+)
+@click.option(
     '--verbose',
     is_flag=True,
     default=False,
     help='Enable verbose output.'
 )
-def prepare_whisper(data_dir, model_path, num_workers_per_device, layer_index, verbose):
+def prepare_whisper(data_dir, model_path, num_workers_per_device, layer_index, verbose, overwrite):
     """
     Prepare Whisper embeddings for each audio file specified in the meta_info.json and save them as .whisper.pt files.
     """
@@ -246,7 +258,8 @@ def prepare_whisper(data_dir, model_path, num_workers_per_device, layer_index, v
                 queue,
                 verbose,
                 device,
-                layer_index
+                layer_index,
+                overwrite
             ),
             name=f"Process-{i}"
         )

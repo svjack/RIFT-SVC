@@ -41,12 +41,18 @@ from rift_svc.modules import RMSExtractor
     help='Hop length for RMS extraction.'
 )
 @click.option(
+    '--overwrite',
+    is_flag=True,
+    default=False,
+    help='Overwrite existing RMS files.'
+)
+@click.option(
     '--verbose',
     is_flag=True,
     default=False,
     help='Enable verbose output.'
 )
-def generate_rms(data_dir, hop_length, verbose):
+def generate_rms(data_dir, hop_length, verbose, overwrite):
     """
     Generate RMS energy for each audio file specified in the meta_info.json and save them as .rms.pt files.
     """
@@ -95,6 +101,11 @@ def generate_rms(data_dir, hop_length, verbose):
         # Construct paths
         wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
         rms_path = Path(data_dir) / speaker / f"{file_name}.rms.pt"
+
+        if rms_path.is_file() and not overwrite:
+            if verbose:
+                click.echo(f"Skipping existing RMS file: {rms_path}", err=True)
+            continue
 
         if not wav_path.is_file():
             if verbose:

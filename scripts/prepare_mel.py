@@ -30,7 +30,7 @@ from functools import partial
 from rift_svc.modules import get_mel_spectrogram
 
 
-def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verbose):
+def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verbose, overwrite):
     """
     Process a single audio file: load, generate Mel spectrogram, save, and return frame length.
 
@@ -41,7 +41,7 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
         n_mel_channels (int): Number of Mel channels.
         sample_rate (int): Target sample rate in Hz.
         verbose (bool): Flag to enable verbose output.
-
+        overwrite (bool): Flag to overwrite existing Mel spectrograms.
     Returns:
         tuple or None: Returns a tuple (audio_type, index, frame_len) if successful, else None.
     """
@@ -58,6 +58,11 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
     # Construct paths
     wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
     mel_path = Path(data_dir) / speaker / f"{file_name}.mel.pt"
+
+    if mel_path.is_file() and not overwrite:
+        if verbose:
+            click.echo(f"Skipping existing Mel spectrogram: {mel_path}", err=True)
+        return None
 
     if not wav_path.is_file():
         if verbose:
@@ -90,17 +95,11 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
         # Save the Mel spectrogram directly to disk
         torch.save(mel, mel_path)
 
-        frame_len = mel.shape[-1]
-
         if verbose:
             click.echo(f"Saved Mel spectrogram: {mel_path}")
 
-        return (audio_type, index, frame_len)
-
     except Exception as e:
         click.echo(f"Error processing {wav_path}: {e}", err=True)
-        return None
-
 
 @click.command()
 @click.option(
@@ -138,12 +137,18 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
     help='Number of workers.'
 )
 @click.option(
+    '--overwrite',
+    is_flag=True,
+    default=False,
+    help='Overwrite existing Mel spectrograms.'
+)
+@click.option(
     '--verbose',
     is_flag=True,
     default=False,
     help='Enable verbose output.'
 )
-def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_workers, verbose):
+def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_workers, verbose, overwrite):
     """
     Generate Mel spectrograms for each audio file specified in the meta_info.json and save them as .mel.pt files.
     This version uses multiprocessing for enhanced efficiency.
@@ -187,35 +192,19 @@ def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_wo
         hop_length=hop_length,
         n_mel_channels=n_mel_channels,
         sample_rate=sample_rate,
-        verbose=verbose
+        verbose=verbose,
+        overwrite=overwrite
     )
 
     with Pool(processes=num_workers) as pool:
         # Use imap_unordered for better performance
-        results = list(tqdm(
+        tqdm(
             pool.imap_unordered(process_func, all_audios),
             total=len(all_audios),
             desc="Generating Mel Spectrograms",
             unit="file"
-        ))
+        )
 
-    # Update meta_info.json with frame lengths
-    for result in results:
-        if result is None:
-            continue
-        audio_type, index, frame_len = result
-        if audio_type == 'train':
-            meta["train_audios"][index]["frame_len"] = frame_len
-        elif audio_type == 'test':
-            meta["test_audios"][index]["frame_len"] = frame_len
-
-    # Save updated meta_info.json
-    try:
-        with open(meta_info, 'w', encoding='utf-8') as f:
-            json.dump(meta, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        click.echo(f"Error writing to meta_info.json: {e}", err=True)
-        sys.exit(1)
 
     click.echo("Mel spectrogram generation complete.")
 

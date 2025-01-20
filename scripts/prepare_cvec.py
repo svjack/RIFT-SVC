@@ -38,7 +38,7 @@ from rift_svc.encoders import HubertModelWithFinalProj
 
 CVEC_SAMPLE_RATE = 16000
 
-def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id=None):
+def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id=None, overwrite=False):
     """
     Worker function to extract content vectors from a subset of audio files.
 
@@ -75,6 +75,12 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
         # Construct paths
         wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
         contentvec_path = Path(data_dir) / speaker / f"{file_name}.cvec.pt"
+
+        if contentvec_path.is_file() and not overwrite:
+            if verbose:
+                queue.put(f"Skipping existing content vector: {contentvec_path} in process {current_process().name}")
+            queue.put("PROGRESS")
+            continue
 
         if not wav_path.is_file():
             if verbose:
@@ -142,12 +148,18 @@ def worker_process(audio_subset, data_dir, model_path, queue, verbose, device_id
     help='Number of workers per device for multiprocessing.'
 )
 @click.option(
+    '--overwrite',
+    is_flag=True,
+    default=False,
+    help='Overwrite existing content vectors.'
+)
+@click.option(
     '--verbose',
     is_flag=True,
     default=False,
     help='Enable verbose output.'
 )
-def generate_contentvec(data_dir, model_path, num_workers_per_device, verbose):
+def generate_contentvec(data_dir, model_path, num_workers_per_device, verbose, overwrite):
     """
     Generate content vectors for each audio file specified in the meta_info.json and save them as .contentvec.pt files.
     """
@@ -228,7 +240,8 @@ def generate_contentvec(data_dir, model_path, num_workers_per_device, verbose):
                 model_path,
                 queue,
                 verbose,
-                device
+                device,
+                overwrite
             ),
             name=f"Process-{i}"
         )
