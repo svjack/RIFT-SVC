@@ -200,7 +200,7 @@ def main(cfg: DictConfig):
             num_workers=cfg.training.num_workers,
             pin_memory=True,
             persistent_workers=True,
-            prefetch_factor=2,
+            #prefetch_factor=1,
             shuffle=True,
             drop_last=True,
             collate_fn=collate_fn,
