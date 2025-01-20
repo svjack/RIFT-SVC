@@ -4,7 +4,7 @@ import logging
 warnings.filterwarnings('ignore')
 
 # Configure logging at the top of your slicer.py
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # This function is obtained from librosa.
@@ -48,11 +48,12 @@ class Slicer:
     def __init__(self,
                  sr: int,
                  threshold: float = -30.,
-                 min_length: int = 3000,
+                 min_length: int = 5000,
                  min_interval: int = 100,
                  hop_size: int = 10,
                  max_sil_kept: int = 300,
-                 look_ahead_frames: int = 4):
+                 look_ahead_frames: int = 4,
+                 min_slice_length: int = 3000):
         if not min_length >= min_interval >= hop_size:
             raise ValueError('The following condition must be satisfied: min_length >= min_interval >= hop_size')
         if not max_sil_kept >= hop_size:
@@ -66,6 +67,7 @@ class Slicer:
         self.min_interval = round(min_interval / self.hop_size)
         self.max_sil_kept = round(sr * max_sil_kept / 1000 / self.hop_size)
         self.look_ahead = look_ahead_frames
+        self.min_slice_length = round(sr * min_slice_length / 1000 / self.hop_size)
 
     def _find_zero_crossing(self, waveform, start_idx, end_idx, direction='forward'):
         """Find the nearest zero crossing point in the given range."""
@@ -252,7 +254,45 @@ class Slicer:
                     self._apply_slice(waveform, start_frame, total_frames)
                 ))
 
-            return chunks_with_pos
+            # Enhanced merging logic to avoid too short slices
+            merged_chunks = []
+            prev_pos, prev_chunk = None, None
+
+            for pos, chunk in chunks_with_pos:
+                chunk_length = len(chunk) // self.hop_size  # Calculate slice length in frames
+                if chunk_length < self.min_slice_length:
+                    if prev_chunk is not None:
+                        # Merge with the previous slice using concatenation
+                        merged_chunk = np.concatenate((prev_chunk, chunk), axis=0)
+                        if merged_chunks:
+                            merged_chunks[-1] = (prev_pos, merged_chunk)
+                        else:
+                            # If merged_chunks is empty, append the merged chunk
+                            merged_chunks.append((prev_pos, merged_chunk))
+                        prev_pos, prev_chunk = None, None
+                    else:
+                        # Temporarily store to merge with next slice
+                        prev_pos, prev_chunk = pos, chunk
+                        continue
+                else:
+                    if prev_chunk is not None:
+                        # Merge the previously stored short slice with the current slice
+                        merged_chunk = np.concatenate((prev_chunk, chunk), axis=0)
+                        merged_chunks.append((prev_pos, merged_chunk))
+                        prev_pos, prev_chunk = None, None
+                    else:
+                        merged_chunks.append((pos, chunk))
+
+            # If there's a remaining short slice at the end, merge it with the last chunk if possible
+            if prev_chunk is not None:
+                if merged_chunks:
+                    last_pos, last_chunk = merged_chunks[-1]
+                    merged_chunks[-1] = (last_pos, np.concatenate((last_chunk, prev_chunk), axis=0))
+                else:
+                    # If no chunks exist yet, just add the remaining chunk
+                    merged_chunks.append((prev_pos, prev_chunk))
+
+            return merged_chunks
 
 
 def main():
