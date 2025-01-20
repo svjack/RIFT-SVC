@@ -68,8 +68,8 @@ class InputEmbedding(nn.Module):
         x = self.mel_embed(x)
         x = torch.cat((x, cond_embed), dim = -1)
         x = self.proj(x)
-        x = self.ln(x)
         x = self.mlp(x) + x
+        x = self.ln(x)
         return x
 
 
@@ -93,7 +93,6 @@ class DiT(nn.Module):
 
         self.dim = dim
         self.depth = depth
-
         self.transformer_blocks = nn.ModuleList(
             [
                 DiTBlock(
@@ -151,7 +150,6 @@ class DiT(nn.Module):
         cvec: Float[torch.Tensor, "b n d2"],
         whisper: Float[torch.Tensor, "b n d3"],
         time: Float[torch.Tensor, "b"] | Float[torch.Tensor, "b n"],  # time step
-        #drop_spk: Bool[torch.Tensor, "b"],  # cfg for speaker
         drop_whisper: Union[bool, Bool[torch.Tensor, "b"]],  # cfg for whisper
         mask: Bool[torch.Tensor, "b n"] | None = None,
     ):
@@ -160,21 +158,7 @@ class DiT(nn.Module):
             time = repeat(time, ' -> b', b = batch)
 
         t = self.time_embed(time)
-
-        # if drop_spk.ndim == 0:
-        #     drop_spk = repeat(drop_spk, '-> b', b=batch)
-        
-        # # Expand null embedding to match batch size
-        # null_spk = repeat(self.null_spk_embed.weight, '1 d -> b d', b=batch)
-        # Get speaker embeddings for the batch
         spk_embeds = self.spk_embed(spk)
-        # Select null or speaker embedding based on drop_spk
-        # spk_embed = torch.where(
-        #     drop_spk.unsqueeze(-1),  # [b, 1]
-        #     null_spk,                # [b, d]
-        #     spk_embeds               # [b, d]
-        # )
-        # the spk embed is added to the time embed
         t = t + spk_embeds
 
         if isinstance(drop_whisper, bool):
@@ -191,7 +175,7 @@ class DiT(nn.Module):
 
         cond_embed = self.cond_embed(f0, rms, cvec, whisper)
         x = self.input_embed(x, cond_embed)
-        
+
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 
         for block in self.transformer_blocks:
