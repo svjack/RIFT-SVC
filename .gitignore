@@ -20,7 +20,7 @@ lightning_logs/*
 *.flac
 *.csv
 
-clean_spk.py
+clean*.py
 upload.py
 test*.py
 viz*.py
