@@ -6,25 +6,96 @@ extracts the RMS energy for each audio file using a PyTorch-based approach, and 
 as a .rms.pt file in the same directory as the original audio file.
 
 Usage:
-    python generate_rms.py --meta-info META_INFO_JSON --data-dir DATA_DIR [OPTIONS]
+    python generate_rms.py --data-dir DATA_DIR [OPTIONS]
 
 Options:
     --data-dir DIRECTORY         Path to the root of the preprocessed dataset directory. (Required)
-    --hop-length INTEGER         Hop length for RMS extraction. (Default: 256)
+    --hop-length INTEGER         Hop length for RMS extraction. (Default: 512)
+    --overwrite                  Overwrite existing RMS files.
     --verbose                    Enable verbose output.
 """
 
 import json
-import sys, os
+import sys
+import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pathlib import Path
-
 import torch
 import torchaudio
 import click
 from tqdm import tqdm
+from multiprocessing import Process, Queue, cpu_count
+
 from rift_svc.modules import RMSExtractor
 
+def worker_process(audio_subset, data_dir, hop_length, queue, verbose, overwrite):
+    """
+    Worker function to extract RMS energy from a subset of audio files.
+
+    Args:
+        audio_subset (list): List of audio entries to process.
+        data_dir (Path): Root directory of the preprocessed dataset.
+        hop_length (int): Hop length for RMS extraction.
+        queue (Queue): Multiprocessing queue to communicate progress.
+        verbose (bool): If True, enable verbose output.
+        overwrite (bool): If True, overwrite existing RMS files.
+    """
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    try:
+        rms_extractor = RMSExtractor(hop_length=hop_length).to(device)
+        rms_extractor.eval()
+    except Exception as e:
+        queue.put(f"Error initializing RMSExtractor: {e}")
+        return
+
+    torch.set_grad_enabled(False)
+
+    for audio in audio_subset:
+        speaker = audio.get('speaker')
+        file_name = audio.get('file_name')
+
+        if not speaker or not file_name:
+            if verbose:
+                queue.put(f"Skipping invalid entry: {audio}")
+            continue
+
+        wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
+        rms_path = Path(data_dir) / speaker / f"{file_name}.rms.pt"
+
+        if rms_path.is_file() and not overwrite:
+            if verbose:
+                queue.put(f"Skipping existing RMS file: {rms_path}")
+            queue.put("PROGRESS")
+            continue
+
+        if not wav_path.is_file():
+            if verbose:
+                queue.put(f"Warning: WAV file not found: {wav_path}")
+            continue
+
+        try:
+            waveform, sr = torchaudio.load(str(wav_path))
+            waveform = waveform.to(device)
+
+            if len(waveform.shape) == 1:
+                waveform = waveform.unsqueeze(0)
+            elif len(waveform.shape) == 2 and waveform.shape[0] != 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+
+            rms = rms_extractor(waveform)
+            rms = rms.cpu()
+            torch.save(rms, rms_path)
+
+            if verbose:
+                queue.put(f"Saved RMS energy: {rms_path}")
+
+            queue.put("PROGRESS")
+
+        except Exception as e:
+            queue.put(f"Error processing {wav_path}: {e}")
+            continue
+
+    queue.put("PROCESS_COMPLETE")
 
 @click.command()
 @click.option(
@@ -56,7 +127,6 @@ def generate_rms(data_dir, hop_length, verbose, overwrite):
     """
     Generate RMS energy for each audio file specified in the meta_info.json and save them as .rms.pt files.
     """
-    # Load meta_info.json
     meta_info = Path(data_dir) / "meta_info.json"
     try:
         with open(meta_info, 'r', encoding='utf-8') as f:
@@ -65,88 +135,61 @@ def generate_rms(data_dir, hop_length, verbose, overwrite):
         click.echo(f"Error reading meta_info.json: {e}", err=True)
         sys.exit(1)
 
-    speakers = meta.get('speakers', [])
     train_audios = meta.get('train_audios', [])
     test_audios = meta.get('test_audios', [])
-
-    # Combine train and test audios
     all_audios = train_audios + test_audios
 
     if not all_audios:
         click.echo("No audio files found in meta_info.json.", err=True)
         sys.exit(1)
 
-    # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    if verbose:
-        click.echo(f"Using device: {device}")
+    num_workers = min(cpu_count(), len(all_audios))
+    split_audios = [[] for _ in range(num_workers)]
+    for i, audio in enumerate(all_audios):
+        split_audios[i % num_workers].append(audio)
 
-    # Initialize the global RMSExtractor object
-    rms_extractor = RMSExtractor(hop_length=hop_length).to(device)
-    rms_extractor.eval()  # Set to evaluation mode
+    queue = Queue()
+    processes = []
+    for i in range(num_workers):
+        p = Process(
+            target=worker_process,
+            args=(
+                split_audios[i],
+                Path(data_dir),
+                hop_length,
+                queue,
+                verbose,
+                overwrite
+            ),
+            name=f"Process-{i+1}"
+        )
+        p.start()
+        processes.append(p)
 
-    # Disable gradient computation
-    torch.set_grad_enabled(False)
+    with tqdm(total=len(all_audios), desc="Extracting RMS Energy", unit="file") as pbar:
+        completed_processes = 0
+        while completed_processes < num_workers:
+            message = queue.get()
+            if message == "PROGRESS":
+                pbar.update(1)
+            elif message.startswith("Saved RMS energy") and verbose:
+                pbar.set_postfix({"Last Saved": message})
+            elif message.startswith("Warning") and verbose:
+                pbar.write(message)
+            elif message.startswith("Error"):
+                pbar.write(message)
+            elif message.startswith("Error initializing RMSExtractor"):
+                pbar.write(message)
+            elif message == "PROCESS_COMPLETE":
+                completed_processes += 1
+            else:
+                if verbose:
+                    pbar.write(message)
 
-    # Process each audio file
-    for audio in tqdm(all_audios, desc="Extracting RMS Energy", unit="file"):
-        speaker = audio.get('speaker')
-        file_name = audio.get('file_name')
-
-        if not speaker or not file_name:
-            if verbose:
-                click.echo(f"Skipping invalid entry: {audio}", err=True)
-            continue
-
-        # Construct paths
-        wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
-        rms_path = Path(data_dir) / speaker / f"{file_name}.rms.pt"
-
-        if rms_path.is_file() and not overwrite:
-            if verbose:
-                click.echo(f"Skipping existing RMS file: {rms_path}", err=True)
-            continue
-
-        if not wav_path.is_file():
-            if verbose:
-                click.echo(f"Warning: WAV file not found: {wav_path}", err=True)
-            continue
-
-        try:
-            # Load audio - Convert Path to string
-            waveform, sr = torchaudio.load(str(wav_path))
-            waveform = waveform.to(device)
-
-            # Ensure waveform has proper shape
-            # RMSExtractor expects (batch, samples)
-            if len(waveform.shape) == 1:
-                waveform = waveform.unsqueeze(0)  # Shape: (1, samples)
-            elif len(waveform.shape) == 2 and waveform.shape[0] != 1:
-                # Convert to mono by averaging channels
-                waveform = waveform.mean(dim=0, keepdim=True)  # Shape: (1, samples)
-
-            # Resample if necessary (though preprocessing assumes consistent sample rate)
-            # If your preprocessing ensured all audios have the target sample rate, this can be skipped
-            # Otherwise, implement resampling here if needed
-
-            # Extract RMS energy
-            rms = rms_extractor(waveform)  # Shape: (1, frames)
-
-            # Move RMS to CPU for saving
-            rms = rms.cpu()
-
-            # Save the RMS energy
-            torch.save(rms, rms_path)
-
-            if verbose:
-                click.echo(f"Saved RMS energy: {rms_path}")
-
-        except Exception as e:
-            click.echo(f"Error processing {wav_path}: {e}", err=True)
-            continue
+    for p in processes:
+        p.join()
 
     click.echo("RMS energy extraction complete.")
-
 
 if __name__ == "__main__":
     generate_rms()
