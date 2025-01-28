@@ -196,6 +196,7 @@ def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_wo
         overwrite=overwrite
     )
 
+    num_workers = min(16, num_workers)
     with Pool(processes=num_workers) as pool:
         # Use imap_unordered for better performance
         tqdm(
