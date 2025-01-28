@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from typing import Optional
 
-from transformers import HubertModel
+from transformers import HubertModel, WavLMModel
 import transformers.models.whisper.modeling_whisper as whisper
 
 

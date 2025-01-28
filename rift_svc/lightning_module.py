@@ -39,27 +39,26 @@ class RIFTSVCLightningModule(LightningModule):
         return self.optimizer
 
     def training_step(self, batch, batch_idx):
-        mel_spec = batch['mel_spec']
+        mel = batch['mel']
         spk_id = batch['spk_id']
         f0 = batch['f0']
         rms = batch['rms']
         cvec = batch['cvec']
-        whisper = batch['whisper']
-        frame_lens = batch['frame_lens']
+        #rspin = batch['rspin']
+        frame_len = batch['frame_len']
 
         loss, _ = self.model(
-            mel_spec,
+            mel,
             spk_id=spk_id,
             f0=f0,
             rms=rms,
             cvec=cvec,
-            whisper=whisper,
-            lens=frame_lens,
+            #rspin=rspin,
+            lens=frame_len,
         )
 
-        for k, v in loss.items():
-            self.log(f'train/{k}', v, prog_bar=True, logger=True)
-        return loss['loss']
+        self.log(f'train/loss', loss.item(), prog_bar=True, logger=True)
+        return loss
     
     def on_validation_start(self):
         self.optimizer.eval()
@@ -125,12 +124,12 @@ class RIFTSVCLightningModule(LightningModule):
         log_media_every_n_steps = self.log_media_every_n_steps
 
         spk_id = batch['spk_id']
-        mel_gt = batch['mel_spec']
+        mel_gt = batch['mel']
         rms = batch['rms']
         f0 = batch['f0']
         cvec = batch['cvec']
-        whisper = batch['whisper']
-        frame_lens = batch['frame_lens']
+        #rspin = batch['rspin']
+        frame_len = batch['frame_len']
 
         mel_gen, _ = self.model.sample(
             src_mel=mel_gt,
@@ -138,8 +137,8 @@ class RIFTSVCLightningModule(LightningModule):
             f0=f0,
             rms=rms,
             cvec=cvec,
-            whisper=whisper,
-            frame_lens=frame_lens,
+            #rspin=rspin,
+            frame_len=frame_len,
             steps=self.eval_sample_steps,
             cfg_strength=self.eval_cfg_strength,
         )
@@ -154,8 +153,8 @@ class RIFTSVCLightningModule(LightningModule):
                 f0=f0,
                 rms=rms,
                 cvec=cvec,
-                whisper=whisper,
-                frame_lens=frame_lens,
+                #rspin=rspin,
+                frame_len=frame_len,
                 steps=self.eval_sample_steps,
                 cfg_strength=self.eval_cfg_strength,
             )
@@ -163,14 +162,14 @@ class RIFTSVCLightningModule(LightningModule):
 
         for i in range(mel_gen.shape[0]):
             sample_idx = batch_idx * mel_gen.shape[0] + i
-            wav_gen = self.vocoder(mel_gen[i:i+1, :frame_lens[i], :].transpose(1, 2), f0[i:i+1, :frame_lens[i]])
-            wav_gt = self.vocoder(mel_gt[i:i+1, :frame_lens[i], :].transpose(1, 2), f0[i:i+1, :frame_lens[i]])
+            wav_gen = self.vocoder(mel_gen[i:i+1, :frame_len[i], :].transpose(1, 2), f0[i:i+1, :frame_len[i]])
+            wav_gt = self.vocoder(mel_gt[i:i+1, :frame_len[i], :].transpose(1, 2), f0[i:i+1, :frame_len[i]])
 
             wav_gen = wav_gen.squeeze(0)
             wav_gt = wav_gt.squeeze(0)
 
             if self.eval_spk_sim:
-                target_wav_gen = self.vocoder(target_mel_gen[i:i+1, :frame_lens[i], :].transpose(1, 2), f0[i:i+1, :frame_lens[i]])
+                target_wav_gen = self.vocoder(target_mel_gen[i:i+1, :frame_len[i], :].transpose(1, 2), f0[i:i+1, :frame_len[i]])
                 target_wav_gen = target_wav_gen.squeeze(0)
 
                 wav_sr = self.vocoder.h.sampling_rate

@@ -211,6 +211,23 @@ class MLP(nn.Module):
         return x
 
 
+# class ConvLinear(nn.Module):
+#     def __init__(self, dim: int, dim_out: int | None = None):
+#         super().__init__()
+#         dim_out = dim_out if dim_out is not None else dim
+#         self.dwconv = nn.Conv1d(dim, dim_out, kernel_size=7, padding=3, groups=dim)
+#         #self.norm = nn.LayerNorm(dim_out, elementwise_affine=False, eps=1e-6)
+#         self.proj = nn.Linear(dim, dim_out)
+
+#     def forward(self, x):
+#         x = x.permute(0, 2, 1)
+#         x = self.dwconv(x)
+#         x = x.permute(0, 2, 1)
+#         #x = self.norm(x)
+#         x = self.proj(x)
+#         return x
+
+
 class Attention(nn.Module):
     def __init__(
         self,
@@ -234,6 +251,9 @@ class Attention(nn.Module):
         self.q_proj = nn.Linear(dim, self.inner_dim)
         self.k_proj = nn.Linear(dim, self.inner_dim)
         self.v_proj = nn.Linear(dim, self.inner_dim)
+        # self.q_proj = nn.Linear(dim, self.inner_dim)
+        # self.k_proj = ConvLinear(dim, self.inner_dim)
+        # self.v_proj = ConvLinear(dim, self.inner_dim)
 
         self.norm_q = nn.LayerNorm(self.head_dim, elementwise_affine=False, eps=1e-6)
         self.norm_k = nn.LayerNorm(self.head_dim, elementwise_affine=False, eps=1e-6)
