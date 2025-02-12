@@ -23,17 +23,14 @@ class RF(nn.Module):
         odeint_kwargs: dict = dict(
             method='euler'
         ),
-        #spk_drop_prob: float = 0.2,
         whisper_drop_prob: float = 0.2,
         num_mel_channels: int | None = 128,
-        lognorm: bool = False,
+        lognorm: bool = True,
     ):
         super().__init__()
 
         self.num_mel_channels = num_mel_channels
 
-        # Unconditional guiding
-        # self.spk_drop_prob = spk_drop_prob
         self.whisper_drop_prob = whisper_drop_prob
 
         self.transformer = transformer
@@ -60,11 +57,10 @@ class RF(nn.Module):
         f0: torch.Tensor,            # [b n]
         rms: torch.Tensor,           # [b n]
         cvec: torch.Tensor,          # [b n d]
-        whisper: torch.Tensor,      # [b n d2]
-        frame_lens: torch.Tensor | None = None,
+        whisper: torch.Tensor,       # [b n d2]
+        frame_len: torch.Tensor | None = None,
         steps: int = 32,
         cfg_strength: float = 2.,
-        # sway_sampling_coef: float | None = None,
         seed: int | None = None,
         interpolate_condition: bool = False,
         t_inter: float = 0.0,
@@ -73,10 +69,10 @@ class RF(nn.Module):
 
         batch, mel_seq_len, device = *src_mel.shape[:2], src_mel.device
 
-        if not exists(frame_lens):
-            frame_lens = torch.full((batch,), mel_seq_len, device=device)
+        if not exists(frame_len):
+            frame_len = torch.full((batch,), mel_seq_len, device=device)
 
-        mask = lens_to_mask(frame_lens)
+        mask = lens_to_mask(frame_len)
 
         # Define the ODE function
         def fn(t, x):
@@ -126,9 +122,6 @@ class RF(nn.Module):
             steps = int(steps * (1 - t_start))
 
         t = torch.linspace(t_start, 1, steps, device=self.device)
-        # sway_sampling from f5-tts
-        # if sway_sampling_coef is not None:
-        #     t = t + sway_sampling_coef * (torch.cos(torch.pi / 2 * t) - 1 + t)
 
         trajectory = odeint(fn, y0, t, **self.odeint_kwargs)
         
@@ -146,16 +139,15 @@ class RF(nn.Module):
         rms: torch.Tensor,        # [b n]
         cvec: torch.Tensor,       # [b n d]
         whisper: torch.Tensor,    # [b n d2]
-        *,
-        lens: torch.Tensor | None = None,
+        frame_len: torch.Tensor | None = None,
     ):
         batch, seq_len, dtype, device = *inp.shape[:2], inp.dtype, self.device
 
         # Handle lengths and masks
-        if not exists(lens):
-            lens = torch.full((batch,), seq_len, device=device)
+        if not exists(frame_len):
+            frame_len = torch.full((batch,), seq_len, device=device)
 
-        mask = lens_to_mask(lens, length=seq_len)  # Typically padded to max length in batch
+        mask = lens_to_mask(frame_len, length=seq_len)  # Typically padded to max length in batch
 
         x1 = self.norm_mel(inp)
         x0 = torch.randn_like(x1)

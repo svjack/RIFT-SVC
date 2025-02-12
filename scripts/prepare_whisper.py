@@ -20,12 +20,15 @@ Options:
 
 import json
 import math
+import os
 import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pathlib import Path
 
 import click
 import torch
 import torchaudio
+import librosa
 from transformers import AutoFeatureExtractor
 
 from multiprocessing_utils import BaseWorker, run_multiprocessing
@@ -33,6 +36,7 @@ from rift_svc.encoders import WhisperEncoder
 
 
 class WhisperWorker(BaseWorker):
+    debug_flag = False
     def load_model(self):
         """
         Load and return the Whisper model along with the feature extractor.
@@ -43,28 +47,28 @@ class WhisperWorker(BaseWorker):
         self.feature_extractor = AutoFeatureExtractor.from_pretrained(self.model_path)
         return model
 
-    def process_audio(self, waveform, sr, layer_index=-2, **kwargs):
+    def process_audio(self, waveform, sr, layer_index=-1, **kwargs):
         """
         Extract Whisper embeddings from the waveform.
         """
+        if not self.debug_flag:
+            print(f"Processing {self.data_dir} {self.model_path} {layer_index}")
+            self.debug_flag = True
         # Resample if necessary
         if sr != self.feature_extractor.sampling_rate:
-            waveform = torchaudio.functional.resample(waveform, orig_freq=sr, new_freq=self.feature_extractor.sampling_rate)
+            waveform = librosa.resample(waveform, orig_sr=sr, target_sr=self.feature_extractor.sampling_rate)
             sr = self.feature_extractor.sampling_rate
-
-        waveform = waveform.numpy()
 
         input_features = self.feature_extractor(
             waveform,
             sampling_rate=sr,
             return_tensors="pt",
-            device=self.device,
-            do_normalize=True
-        )
-        input_features = {k: v.to(self.device) for k, v in input_features.items()}
+            do_normalize=True,
+            padding=False,
+        )['input_features'].to(self.device)
 
         with torch.no_grad():
-            outputs = self.model(**input_features, output_hidden_states=True)
+            outputs = self.model(input_features, output_hidden_states=True)
             whisper = outputs.hidden_states[layer_index].squeeze(0).cpu()
 
         # Compute truncation length based on duration and model specifics
@@ -73,12 +77,57 @@ class WhisperWorker(BaseWorker):
         whisper = whisper[:trunc_len].contiguous()
 
         return whisper
+    
+    def handle_audio(self, audio):
+        """
+        Handle the processing of a single audio entry.
+        """
+        speaker = audio.get('speaker')
+        file_name = audio.get('file_name')
+
+        if not speaker or not file_name:
+            if self.verbose:
+                self.queue.put(f"Skipping invalid entry: {audio}")
+            return
+
+        wav_path = Path(self.data_dir) / speaker / f"{file_name}.wav"
+        output_path = self.get_output_path(speaker, file_name)
+
+        if output_path.is_file() and not self.overwrite:
+            if self.verbose:
+                self.queue.put(f"Skipping existing file: {output_path}")
+            self.queue.put("PROGRESS")
+            return
+
+        if not wav_path.is_file():
+            if self.verbose:
+                self.queue.put(f"Warning: WAV file not found: {wav_path}")
+            return
+
+        try:
+            # Load audio
+            waveform, sr = librosa.load(str(wav_path))
+
+            # Process audio
+            output = self.process_audio(waveform, sr, **self.kwargs)
+
+            # Save output
+            self.save_output(output, output_path)
+
+            if self.verbose:
+                self.queue.put(f"Saved output: {output_path}")
+
+            # Update progress
+            self.queue.put("PROGRESS")
+
+        except Exception as e:
+            self.queue.put(f"Error processing {wav_path}: {e}")
 
     def save_output(self, output, output_path):
         """
         Save the Whisper embedding to the specified path.
         """
-        torch.save(output, output_path)
+        torch.save(output.cpu(), output_path)
 
     def get_output_path(self, speaker, file_name):
         """
@@ -96,15 +145,16 @@ class WhisperWorker(BaseWorker):
 @click.option(
     '--model-path',
     type=click.Path(exists=True, file_okay=True, readable=True),
-    required=True,
+    required=False,
+    default="pretrained/whisper-small-encoder4svc",
     help='Path to the pre-trained Whisper model file.'
 )
 @click.option(
     '--layer-index',
     type=int,
-    default=-2,
+    default=-1,
     show_default=True,
-    help='Layer index to extract embeddings from. -2 for the second last layer.'
+    help='Layer index to extract embeddings from. -1 for the last layer.'
 )
 @click.option(
     '--num-workers-per-device',

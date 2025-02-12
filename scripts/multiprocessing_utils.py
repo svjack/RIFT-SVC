@@ -16,14 +16,14 @@ class BaseWorker:
         - save_output(output, output_path): Save the processed output to the specified path.
     """
 
-    def __init__(self, data_dir, model_path, queue, verbose, overwrite, **kwargs):
+    def __init__(self, data_dir, model_path, queue, verbose, overwrite, device_id, **kwargs):
         self.data_dir = data_dir
         self.model_path = model_path
         self.queue = queue
         self.verbose = verbose
         self.overwrite = overwrite
         self.kwargs = kwargs
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")
         self.model = self.load_model()
 
     def load_model(self):
@@ -189,8 +189,10 @@ def run_multiprocessing(
                 queue,
                 verbose,
                 overwrite,
-                split_audios[i]
+                devices[i % len(devices)] if devices else -1,  # Handle case when no devices
+                split_audios[i],
             ),
+            kwargs=kwargs,  # Pass the additional keyword arguments here
             name=f"Process-{i}"
         )
         p.start()
@@ -223,7 +225,7 @@ def run_multiprocessing(
 
     click.echo("Processing complete.")
 
-def process_wrapper(worker_cls, data_dir, model_path, queue, verbose, overwrite, audio_subset):
+def process_wrapper(worker_cls, data_dir, model_path, queue, verbose, overwrite, device_id, audio_subset, **kwargs):
     """
     Wrap the worker's run method to be compatible with multiprocessing.Process.
     Instantiates the worker within the child process.
@@ -236,12 +238,15 @@ def process_wrapper(worker_cls, data_dir, model_path, queue, verbose, overwrite,
         verbose (bool): If True, enable verbose output.
         overwrite (bool): If True, overwrite existing output files.
         audio_subset (list): A subset of audio entries to process.
+        **kwargs: Additional keyword arguments for the worker.
     """
     worker = worker_cls(
         data_dir=data_dir,
         model_path=model_path,
         queue=queue,
         verbose=verbose,
-        overwrite=overwrite
+        overwrite=overwrite,
+        device_id=device_id,
+        **kwargs  # Forward the additional keyword arguments to the worker
     )
     worker.run(audio_subset)

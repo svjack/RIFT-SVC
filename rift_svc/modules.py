@@ -187,12 +187,13 @@ class ReLU2(nn.Module):
 
 # FeedForward
 class MLP(nn.Module):
-    def __init__(self, dim: int, dim_out: int | None = None, mult: float = 4, dropout: float = 0.):
+    def __init__(self, dim: int, dim_out: int | None = None, mult: float = 4, dropout: float = 0.1):
         super().__init__()
         inner_dim = int(dim * mult)
         dim_out = dim_out if dim_out is not None else dim
 
-        self.dwconv = nn.Conv1d(dim, dim, kernel_size=7, padding=3, groups=dim)
+        #self.dwconv = nn.Conv1d(dim, dim, kernel_size=7, padding=3, groups=dim)
+        self.dwconv = nn.Conv1d(dim, dim, kernel_size=31, padding=15, groups=dim)
         self.norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.activation = ReLU2()
         self.dropout = nn.Dropout(dropout)
@@ -211,21 +212,20 @@ class MLP(nn.Module):
         return x
 
 
-# class ConvLinear(nn.Module):
-#     def __init__(self, dim: int, dim_out: int | None = None):
-#         super().__init__()
-#         dim_out = dim_out if dim_out is not None else dim
-#         self.dwconv = nn.Conv1d(dim, dim_out, kernel_size=7, padding=3, groups=dim)
-#         #self.norm = nn.LayerNorm(dim_out, elementwise_affine=False, eps=1e-6)
-#         self.proj = nn.Linear(dim, dim_out)
+class ConvLinear(nn.Module):
+    def __init__(self, dim: int, dim_out: int | None = None):
+        super().__init__()
+        dim_out = dim_out if dim_out is not None else dim
+        #self.dwconv = nn.Conv1d(dim, dim_out, kernel_size=7, padding=3, groups=dim)
+        self.dwconv = nn.Conv1d(dim, dim_out, kernel_size=31, padding=15, groups=dim)
+        self.proj = nn.Linear(dim, dim_out)
 
-#     def forward(self, x):
-#         x = x.permute(0, 2, 1)
-#         x = self.dwconv(x)
-#         x = x.permute(0, 2, 1)
-#         #x = self.norm(x)
-#         x = self.proj(x)
-#         return x
+    def forward(self, x):
+        x = x.permute(0, 2, 1)
+        x = self.dwconv(x)
+        x = x.permute(0, 2, 1)
+        x = self.proj(x)
+        return x
 
 
 class Attention(nn.Module):
@@ -233,7 +233,7 @@ class Attention(nn.Module):
         self,
         dim: int,
         head_dim: int = 64,
-        dropout: float = 0.0,
+        dropout: float = 0.1,
     ):
         super().__init__()
 
@@ -248,12 +248,12 @@ class Attention(nn.Module):
         self.dropout = dropout
         self.scale = 1 / dim
 
-        self.q_proj = nn.Linear(dim, self.inner_dim)
-        self.k_proj = nn.Linear(dim, self.inner_dim)
-        self.v_proj = nn.Linear(dim, self.inner_dim)
         # self.q_proj = nn.Linear(dim, self.inner_dim)
-        # self.k_proj = ConvLinear(dim, self.inner_dim)
-        # self.v_proj = ConvLinear(dim, self.inner_dim)
+        # self.k_proj = nn.Linear(dim, self.inner_dim)
+        # self.v_proj = nn.Linear(dim, self.inner_dim)
+        self.q_proj = nn.Linear(dim, self.inner_dim)
+        self.k_proj = ConvLinear(dim, self.inner_dim)
+        self.v_proj = ConvLinear(dim, self.inner_dim)
 
         self.norm_q = nn.LayerNorm(self.head_dim, elementwise_affine=False, eps=1e-6)
         self.norm_k = nn.LayerNorm(self.head_dim, elementwise_affine=False, eps=1e-6)
@@ -320,7 +320,7 @@ class DiTBlock(nn.Module):
 
     def __init__(self, dim: int, head_dim: int, ff_mult: float = 4, dropout: float = 0.1):
         super().__init__()
-        
+
         self.attn_norm = AdaLayerNormZero(dim)
         self.attn = Attention(
             dim = dim,

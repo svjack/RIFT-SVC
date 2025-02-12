@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 import pyloudnorm as pyln
 from tqdm import tqdm
+import librosa
 from transformers import AutoFeatureExtractor
 
 from rift_svc.nsf_hifigan import NsfHifiGAN
@@ -92,8 +93,8 @@ def main(
     rmvpe = RMVPE(model_path="pretrained/rmvpe/model.pt", hop_length=160, device=device)
     hubert = HubertModelWithFinalProj.from_pretrained("pretrained/content-vec-best").to(device)
     rms_extractor = RMSExtractor(hop_length=hop_length).to(device)
-    whisper_encoder = WhisperEncoder.from_pretrained("pretrained/whisper-large-v3").to(device)
-    whisper_feature_extractor = AutoFeatureExtractor.from_pretrained("pretrained/whisper-large-v3")
+    whisper_encoder = WhisperEncoder.from_pretrained("pretrained/whisper-large-v3-encoder4svc").to(device)
+    whisper_feature_extractor = AutoFeatureExtractor.from_pretrained("pretrained/whisper-large-v3-encoder4svc")
 
     # Load and preprocess input audio
     click.echo("Loading audio...")
@@ -109,11 +110,13 @@ def main(
     # Initialize Slicer
     slicer = Slicer(
         sr=sample_rate,
-        threshold=-30.0,
+        threshold=-35.0,
         min_length=3000,
         min_interval=100,
         hop_size=10,
-        max_sil_kept=300
+        max_sil_kept=300,
+        look_ahead_frames=4,
+        min_slice_length=2000
     )
 
     # Initialize Loudness Meter
@@ -143,68 +146,81 @@ def main(
         audio[:fade_samples] *= fade_curve
         return audio
 
-    def process_segment(audio_segment, mel=None, cvec=None, f0=None, rms=None):
+    def process_segment(audio_segment):
         """Process a single audio segment with consistent handling"""
         # Normalize input segment
         original_loudness = meter.integrated_loudness(audio_segment)
         normalized_audio = pyln.normalize.loudness(audio_segment, original_loudness, target_loudness)
-        
+
         # Handle potential clipping
         max_amp = np.max(np.abs(normalized_audio))
         if max_amp > 1.0:
             normalized_audio = normalized_audio * (0.99 / max_amp)
-        
-        # Convert to tensor if not already provided
-        if mel is None or cvec is None or f0 is None or rms is None:
-            audio_tensor = torch.from_numpy(normalized_audio).float().unsqueeze(0).to(device)
-            audio_16khz = torchaudio.functional.resample(audio_tensor, sample_rate, 16000)
-            
-            mel = get_mel_spectrogram(
-                audio_tensor,
-                sampling_rate=sample_rate,
-                n_fft=2048,
-                num_mels=128,
-                hop_size=hop_length,
-                win_size=2048,
-                fmin=40,
-                fmax=16000
-            ).transpose(1, 2)
-            
-            cvec = hubert(audio_16khz)["last_hidden_state"].squeeze(0)
-            cvec = interpolate_tensor(cvec, mel.shape[1])[None, :]
 
-            input_features = whisper_feature_extractor(audio_16khz.cpu().numpy(), sampling_rate=16000, return_tensors="pt", device=device, do_normalize=True)
-            input_features = {k: v.to(device) for k, v in input_features.items()}
-            whisper_outputs = whisper_encoder(**input_features, output_hidden_states=True)
-            trunc_len = math.floor((audio_16khz.shape[1] / 16000)*50)
-            whisper = whisper_outputs.hidden_states[-2][0, :trunc_len]
-            whisper = interpolate_tensor(whisper, mel.shape[1])[None, :]
+        audio_tensor = torch.from_numpy(normalized_audio).float().unsqueeze(0).to(device)
+        audio_16khz = torch.from_numpy(librosa.resample(normalized_audio, orig_sr=sample_rate, target_sr=16000)).float().unsqueeze(0).to(device)
 
+        mel = get_mel_spectrogram(
+            audio_tensor,
+            sampling_rate=sample_rate,
+            n_fft=2048,
+            num_mels=128,
+            hop_size=hop_length,
+            win_size=2048,
+            fmin=40,
+            fmax=16000
+        ).transpose(1, 2)
 
-            f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
-            f0 = post_process_f0(f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
-            if key_shift != 0:
-                f0 = f0 * 2 ** (key_shift / 12)
-            f0 = torch.from_numpy(f0).float().to(device)[None, :]
-            
-            rms = rms_extractor(audio_tensor)
-            spk_id = torch.LongTensor([speaker_id]).to(device)
+        cvec = hubert(audio_16khz)["last_hidden_state"].squeeze(0)
+        cvec = interpolate_tensor(cvec, mel.shape[1])[None, :]
+
+        input_features = whisper_feature_extractor(
+            audio_16khz.cpu().numpy(),
+            sampling_rate=16000,
+            return_tensors="pt",
+            do_normalize=True,
+            padding=False
+        )['input_features'].to(device)
+        whisper_outputs = whisper_encoder(input_features, output_hidden_states=True)
+        trunc_len = math.floor((audio_16khz.shape[1] / 16000)*50)
+        whisper = whisper_outputs.hidden_states[-2][0, :trunc_len]
+        whisper = interpolate_tensor(whisper, mel.shape[1])[None, :]
+
+        f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
+        f0 = post_process_f0(f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
+        if key_shift != 0:
+            f0 = f0 * 2 ** (key_shift / 12)
+        f0 = torch.from_numpy(f0).float().to(device)[None, :]
         
-        # Process with model
-        mel_out, _ = model.sample(
-            src_mel=mel,
-            spk_id=spk_id,
-            f0=f0,
-            rms=rms,
-            cvec=cvec,
-            whisper=whisper,
-            steps=infer_steps,
-            cfg_strength=cfg_strength,
-            interpolate_condition=True if interpolate_src > 0 else False,
-            t_inter=interpolate_src
-        )
-        
+        rms = rms_extractor(audio_tensor)
+        spk_id = torch.LongTensor([speaker_id]).to(device)
+
+        mel_outputs = []
+        sliced_len = 256
+
+        for i in range(0, mel.shape[1], sliced_len):
+            mel_slice = mel[:, i:i+sliced_len, :]
+            cvec_slice = cvec[:, i:i+sliced_len, :]
+            whisper_slice = whisper[:, i:i+sliced_len, :]
+            f0_slice = f0[:, i:i+sliced_len]
+            rms_slice = rms[:, i:i+sliced_len]
+
+            # Process with model
+            mel_out, _ = model.sample(
+                src_mel=mel_slice,
+                spk_id=spk_id,
+                f0=f0_slice,
+                rms=rms_slice,
+                cvec=cvec_slice,
+                whisper=whisper_slice,
+                steps=infer_steps,
+                cfg_strength=cfg_strength,
+                interpolate_condition=True if interpolate_src > 0 else False,
+                t_inter=interpolate_src
+            )
+            mel_outputs.append(mel_out)
         # Generate audio
+        mel_out = torch.cat(mel_outputs, dim=1)
         audio_out = vocoder(mel_out.transpose(1, 2), f0)
         audio_out = audio_out.squeeze().cpu().numpy()
 
