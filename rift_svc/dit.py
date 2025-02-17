@@ -19,33 +19,34 @@ from rift_svc.modules import (
 
 # Conditional embedding for f0, rms, cvec
 class CondEmbedding(nn.Module):
-    def __init__(self, cvec_dim: int, whisper_dim: int, cond_dim: int):
+    def __init__(self, cvec_dim: int, cvec2_dim: int, cond_dim: int):
         super().__init__()
         self.cvec_dim = cvec_dim
-        self.whisper_dim = whisper_dim
+        self.cvec2_dim = cvec2_dim
         self.cond_dim = cond_dim
 
         self.f0_embed = nn.Linear(1, cond_dim)
         self.rms_embed = nn.Linear(1, cond_dim)
         self.cvec_embed = nn.Linear(cvec_dim, cond_dim)
-        self.whisper_embed = nn.Linear(whisper_dim, cond_dim)
+        self.cvec2_embed = nn.Linear(cvec2_dim, cond_dim)
         self.cvec_conv = ConvLinear(cond_dim, cond_dim)
-        self.whisper_conv = ConvLinear(cond_dim, cond_dim)
-        self.null_whisper_embed = nn.Embedding(1, cond_dim)
+        self.cvec2_conv = ConvLinear(cond_dim, cond_dim)
+        self.null_cvec2_embed = nn.Embedding(1, cond_dim)
 
         self.mlp = MLP(cond_dim, cond_dim, mult = 2)
 
         self.ln_cvec = nn.LayerNorm(cond_dim, elementwise_affine=False, eps=1e-6)
-        self.ln_whisper = nn.LayerNorm(cond_dim, elementwise_affine=False, eps=1e-6)
+        self.ln_cvec2 = nn.LayerNorm(cond_dim, elementwise_affine=False, eps=1e-6)
         self.ln = nn.LayerNorm(cond_dim, elementwise_affine=True, eps=1e-6)
+
 
     def forward(
             self,
             f0: Float[torch.Tensor, "b n"],
             rms: Float[torch.Tensor, "b n"],
             cvec: Float[torch.Tensor, "b n d"],
-            whisper: Float[torch.Tensor, "b n d2"],
-            drop_whisper: Bool[torch.Tensor, "b"],
+            cvec2: Float[torch.Tensor, "b n d2"],
+            drop_cvec2: Bool[torch.Tensor, "b"],
         ):
         if f0.ndim == 2:
             f0 = f0.unsqueeze(-1)
@@ -55,17 +56,17 @@ class CondEmbedding(nn.Module):
         f0_embed = self.f0_embed(f0 / 1200)
         rms_embed = self.rms_embed(rms)
         cvec_embed = self.ln_cvec(self.cvec_embed(cvec))
-        whisper_embed = self.ln_whisper(self.whisper_embed(whisper))
+        cvec2_embed = self.ln_cvec2(self.cvec2_embed(cvec2))
 
-        drop_whisper = drop_whisper[:, None, None]
-        b, n, d = whisper_embed.shape
-        whisper_embed = torch.where(
-            drop_whisper,
-            self.null_whisper_embed.weight.expand(b, n, d),
-            whisper_embed
+        drop_cvec2 = drop_cvec2[:, None, None]
+        b, n, d = cvec2_embed.shape
+        cvec2_embed = torch.where(
+            drop_cvec2,
+            self.null_cvec2_embed.weight.expand(b, n, d),
+            cvec2_embed
         )
 
-        cond = f0_embed + rms_embed + self.cvec_conv(cvec_embed) + self.whisper_conv(whisper_embed)
+        cond = f0_embed + rms_embed + self.cvec_conv(cvec_embed) + self.cvec2_conv(cvec2_embed)
         cond = self.mlp(cond) + cond
         return self.ln(cond)
 
@@ -92,14 +93,14 @@ class InputEmbedding(nn.Module):
 class DiT(nn.Module):
     def __init__(self,
                  dim: int, depth: int, head_dim: int = 64, dropout: float = 0.0, ff_mult: int = 4,
-                 mel_dim: int = 128, num_speaker: int = 1, cvec_dim: int = 768, whisper_dim: int = 768,
+                 mel_dim: int = 128, num_speaker: int = 1, cvec_dim: int = 768, cvec2_dim: int = 768,
                  init_std: float = 1):
         super().__init__()
-
+    
         self.num_speaker = num_speaker
         self.spk_embed = nn.Embedding(num_speaker, dim)
         self.time_embed = TimestepEmbedding(dim)
-        self.cond_embed = CondEmbedding(cvec_dim, whisper_dim, dim)
+        self.cond_embed = CondEmbedding(cvec_dim, cvec2_dim, dim)   
         self.input_embed = InputEmbedding(mel_dim, dim)
 
         self.rotary_embed = RotaryEmbedding(head_dim)
@@ -162,8 +163,8 @@ class DiT(nn.Module):
         f0: Float[torch.Tensor, "b n"],
         rms: Float[torch.Tensor, "b n"],
         cvec: Float[torch.Tensor, "b n d2"],
-        whisper: Float[torch.Tensor, "b n d3"],
-        drop_whisper: bool | Bool[torch.Tensor, "b"],
+        cvec2: Float[torch.Tensor, "b n d3"],
+        drop_cvec2: bool | Bool[torch.Tensor, "b"],
         time: Float[torch.Tensor, "b"] | Float[torch.Tensor, "b n"],  # time step
         mask: Bool[torch.Tensor, "b n"] | None = None,
     ):
@@ -175,10 +176,10 @@ class DiT(nn.Module):
         spk_embeds = self.spk_embed(spk)
         t = t + spk_embeds
 
-        if isinstance(drop_whisper, bool):
-            drop_whisper = torch.full((batch,), drop_whisper, device=x.device)
+        if isinstance(drop_cvec2, bool):
+            drop_cvec2 = torch.full((batch,), drop_cvec2, device=x.device)
 
-        cond_embed = self.cond_embed(f0, rms, cvec, whisper, drop_whisper)
+        cond_embed = self.cond_embed(f0, rms, cvec, cvec2, drop_cvec2)
         x = self.input_embed(x, cond_embed)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)

@@ -23,7 +23,7 @@ class RF(nn.Module):
         odeint_kwargs: dict = dict(
             method='euler'
         ),
-        whisper_drop_prob: float = 0.2,
+        cvec2_drop_prob: float = 0.2,
         num_mel_channels: int | None = 128,
         lognorm: bool = True,
     ):
@@ -31,7 +31,7 @@ class RF(nn.Module):
 
         self.num_mel_channels = num_mel_channels
 
-        self.whisper_drop_prob = whisper_drop_prob
+        self.cvec2_drop_prob = cvec2_drop_prob
 
         self.transformer = transformer
         dim = transformer.dim
@@ -57,7 +57,7 @@ class RF(nn.Module):
         f0: torch.Tensor,            # [b n]
         rms: torch.Tensor,           # [b n]
         cvec: torch.Tensor,          # [b n d]
-        whisper: torch.Tensor,       # [b n d2]
+        cvec2: torch.Tensor,         # [b n d2]
         frame_len: torch.Tensor | None = None,
         steps: int = 32,
         cfg_strength: float = 2.,
@@ -82,9 +82,9 @@ class RF(nn.Module):
                 f0=f0, 
                 rms=rms, 
                 cvec=cvec, 
-                whisper=whisper,
+                cvec2=cvec2,
                 time=t, 
-                drop_whisper=True, 
+                drop_cvec2=True, 
                 mask=mask
             )
             if cfg_strength < 1e-5:
@@ -96,9 +96,9 @@ class RF(nn.Module):
                 f0=f0, 
                 rms=rms, 
                 cvec=cvec, 
-                whisper=whisper,
+                cvec2=cvec2,
                 time=t, 
-                drop_whisper=False,
+                drop_cvec2=False,
                 mask=mask
             )
 
@@ -138,7 +138,7 @@ class RF(nn.Module):
         f0: torch.Tensor,         # [b n]
         rms: torch.Tensor,        # [b n]
         cvec: torch.Tensor,       # [b n d]
-        whisper: torch.Tensor,    # [b n d2]
+        cvec2: torch.Tensor,      # [b n d2]
         frame_len: torch.Tensor | None = None,
     ):
         batch, seq_len, dtype, device = *inp.shape[:2], inp.dtype, self.device
@@ -168,10 +168,10 @@ class RF(nn.Module):
         # unconditional guiding dropout rates
         #drop_whisper = torch.rand((batch,), device=device) < self.whisper_drop_prob
         # Drop a fixed proportion of the batch
-        num_to_drop = int(batch * self.whisper_drop_prob)
+        num_to_drop = int(batch * self.cvec2_drop_prob)
         drop_indices = torch.randperm(batch, device=device)[:num_to_drop]
-        drop_whisper = torch.zeros(batch, dtype=torch.bool, device=device)
-        drop_whisper[drop_indices] = True
+        drop_cvec2 = torch.zeros(batch, dtype=torch.bool, device=device)
+        drop_cvec2[drop_indices] = True
 
         pred = self.transformer(
             x=xt, 
@@ -179,9 +179,9 @@ class RF(nn.Module):
             f0=f0, 
             rms=rms, 
             cvec=cvec, 
-            whisper=whisper,
+            cvec2=cvec2,
             time=time, 
-            drop_whisper=drop_whisper,
+            drop_cvec2=drop_cvec2,
             mask=mask
         )
 

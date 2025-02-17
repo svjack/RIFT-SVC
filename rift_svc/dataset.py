@@ -49,10 +49,10 @@ class SVCDataset(Dataset):
         rms = pt_load(path + ".rms.pt").squeeze(0)
         f0 = pt_load(path + ".f0.pt").squeeze(0)
         cvec = pt_load(path + ".cvec.pt").squeeze(0)
-        whisper = pt_load(path + ".whisper.pt").squeeze(0)
+        cvec2 = pt_load(path + ".whisper.pt").squeeze(0)
 
         cvec = interpolate_tensor(cvec, mel.shape[0]) # [T, D]
-        whisper = interpolate_tensor(whisper, mel.shape[0]) # [T, D]
+        cvec2 = interpolate_tensor(cvec2, mel.shape[0]) # [T, D]
         frame_len = mel.shape[0]
 
         if frame_len > self.max_frame_len:
@@ -76,7 +76,7 @@ class SVCDataset(Dataset):
             rms = rms[start:end]
             f0 = f0[start:end]
             cvec = cvec[start:end]
-            whisper = whisper[start:end]
+            cvec2 = cvec2[start:end]
             frame_len = self.max_frame_len
 
         result = dict(
@@ -85,7 +85,7 @@ class SVCDataset(Dataset):
             rms = rms,
             f0 = f0,
             cvec = cvec,
-            whisper = whisper,
+            cvec2 = cvec2,
             frame_len = frame_len
         )
 
@@ -102,7 +102,7 @@ def collate_fn(batch):
     rmss = [item['rms'] for item in batch]
     f0s = [item['f0'] for item in batch]
     cvecs = [item['cvec'] for item in batch]
-    whispers = [item['whisper'] for item in batch]
+    cvec2s = [item['cvec2'] for item in batch]
 
     frame_lens = [item['frame_len'] for item in batch]
 
@@ -111,7 +111,7 @@ def collate_fn(batch):
     rmss_padded = pad_sequence(rmss, batch_first=True)
     f0s_padded = pad_sequence(f0s, batch_first=True)
     cvecs_padded = pad_sequence(cvecs, batch_first=True)
-    whispers_padded = pad_sequence(whispers, batch_first=True)
+    cvec2s_padded = pad_sequence(cvec2s, batch_first=True)
 
     spk_ids = torch.cat(spk_ids)
     frame_len = torch.tensor(frame_lens)
@@ -122,6 +122,6 @@ def collate_fn(batch):
         'rms': rmss_padded,
         'f0': f0s_padded,
         'cvec': cvecs_padded,
-        'whisper': whispers_padded,
+        'cvec2': cvec2s_padded,
         'frame_len': frame_len
     }

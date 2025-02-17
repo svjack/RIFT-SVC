@@ -44,7 +44,7 @@ class RIFTSVCLightningModule(LightningModule):
         f0 = batch['f0']
         rms = batch['rms']
         cvec = batch['cvec']
-        whisper = batch['whisper']
+        cvec2 = batch['cvec2']
         frame_len = batch['frame_len']
 
         loss, _ = self.model(
@@ -53,7 +53,7 @@ class RIFTSVCLightningModule(LightningModule):
             f0=f0,
             rms=rms,
             cvec=cvec,
-            whisper=whisper,
+            cvec2=cvec2,
             frame_len=frame_len,
         )
 
@@ -128,7 +128,7 @@ class RIFTSVCLightningModule(LightningModule):
         rms = batch['rms']
         f0 = batch['f0']
         cvec = batch['cvec']
-        whisper = batch['whisper']
+        cvec2 = batch['cvec2']
         frame_len = batch['frame_len']
 
         mel_gen, _ = self.model.sample(
@@ -137,7 +137,7 @@ class RIFTSVCLightningModule(LightningModule):
             f0=f0,
             rms=rms,
             cvec=cvec,
-            whisper=whisper,
+            cvec2=cvec2,
             frame_len=frame_len,
             steps=self.eval_sample_steps,
             cfg_strength=self.eval_cfg_strength,
@@ -153,7 +153,7 @@ class RIFTSVCLightningModule(LightningModule):
                 f0=f0,
                 rms=rms,
                 cvec=cvec,
-                whisper=whisper,
+                cvec2=cvec2,
                 frame_len=frame_len,
                 steps=self.eval_sample_steps,
                 cfg_strength=self.eval_cfg_strength,
