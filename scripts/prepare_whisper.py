@@ -47,12 +47,12 @@ class WhisperWorker(BaseWorker):
         self.feature_extractor = AutoFeatureExtractor.from_pretrained(self.model_path)
         return model
 
-    def process_audio(self, waveform, sr, layer_index=-1, **kwargs):
+    def process_audio(self, waveform, sr, **kwargs):
         """
         Extract Whisper embeddings from the waveform.
         """
         if not self.debug_flag:
-            print(f"Processing {self.data_dir} {self.model_path} {layer_index}")
+            print(f"Processing {self.data_dir} {self.model_path}")
             self.debug_flag = True
         # Resample if necessary
         if sr != self.feature_extractor.sampling_rate:
@@ -68,8 +68,8 @@ class WhisperWorker(BaseWorker):
         )['input_features'].to(self.device)
 
         with torch.no_grad():
-            outputs = self.model(input_features, output_hidden_states=True)
-            whisper = outputs.hidden_states[layer_index].squeeze(0).cpu()
+            outputs = self.model(input_features)
+            whisper = outputs.last_hidden_state.squeeze(0).cpu()
 
         # Compute truncation length based on duration and model specifics
         duration = waveform.shape[-1] / sr
@@ -146,15 +146,8 @@ class WhisperWorker(BaseWorker):
     '--model-path',
     type=click.Path(exists=True, file_okay=True, readable=True),
     required=False,
-    default="pretrained/whisper-small-encoder4svc",
+    default="pretrained/whisper-large-v3-encoder4svc-cl-mlp",
     help='Path to the pre-trained Whisper model file.'
-)
-@click.option(
-    '--layer-index',
-    type=int,
-    default=-1,
-    show_default=True,
-    help='Layer index to extract embeddings from. -1 for the last layer.'
 )
 @click.option(
     '--num-workers-per-device',
@@ -175,7 +168,7 @@ class WhisperWorker(BaseWorker):
     default=False,
     help='Enable verbose output.'
 )
-def prepare_whisper(data_dir, model_path, layer_index, num_workers_per_device, overwrite, verbose):
+def prepare_whisper(data_dir, model_path, num_workers_per_device, overwrite, verbose):
     """
     Prepare Whisper embeddings for each audio file specified in the meta_info.json and save them as .whisper.pt files.
     """
@@ -205,7 +198,6 @@ def prepare_whisper(data_dir, model_path, layer_index, num_workers_per_device, o
         num_workers_per_device=num_workers_per_device,
         verbose=verbose,
         overwrite=overwrite,
-        layer_index=layer_index
     )
 
 if __name__ == "__main__":
