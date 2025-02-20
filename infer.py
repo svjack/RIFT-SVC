@@ -93,8 +93,8 @@ def main(
     rmvpe = RMVPE(model_path="pretrained/rmvpe/model.pt", hop_length=160, device=device)
     hubert = HubertModelWithFinalProj.from_pretrained("pretrained/content-vec-best").to(device)
     rms_extractor = RMSExtractor(hop_length=hop_length).to(device)
-    whisper_encoder = WhisperEncoder.from_pretrained("pretrained/whisper-large-v3-encoder4svc").to(device)
-    whisper_feature_extractor = AutoFeatureExtractor.from_pretrained("pretrained/whisper-large-v3-encoder4svc")
+    cvec2_encoder = WhisperEncoder.from_pretrained("pretrained/whisper-large-v3-encoder4svc-cl-linear").to(device)
+    cvec2_feature_extractor = AutoFeatureExtractor.from_pretrained("pretrained/whisper-large-v3-encoder4svc-cl-linear")
 
     # Load and preprocess input audio
     click.echo("Loading audio...")
@@ -174,17 +174,17 @@ def main(
         cvec = hubert(audio_16khz)["last_hidden_state"].squeeze(0)
         cvec = interpolate_tensor(cvec, mel.shape[1])[None, :]
 
-        input_features = whisper_feature_extractor(
+        input_features = cvec2_feature_extractor(
             audio_16khz.cpu().numpy(),
             sampling_rate=16000,
             return_tensors="pt",
             do_normalize=True,
             padding=False
         )['input_features'].to(device)
-        whisper_outputs = whisper_encoder(input_features, output_hidden_states=True)
+        cvec2_outputs = cvec2_encoder(input_features)
         trunc_len = math.floor((audio_16khz.shape[1] / 16000)*50)
-        whisper = whisper_outputs.hidden_states[-2][0, :trunc_len]
-        whisper = interpolate_tensor(whisper, mel.shape[1])[None, :]
+        cvec2 = cvec2_outputs.last_hidden_state[0, :trunc_len]
+        cvec2 = interpolate_tensor(cvec2, mel.shape[1])[None, :]
 
         f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
         f0 = post_process_f0(f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
@@ -201,7 +201,7 @@ def main(
         for i in range(0, mel.shape[1], sliced_len):
             mel_slice = mel[:, i:i+sliced_len, :]
             cvec_slice = cvec[:, i:i+sliced_len, :]
-            whisper_slice = whisper[:, i:i+sliced_len, :]
+            cvec2_slice = cvec2[:, i:i+sliced_len, :]
             f0_slice = f0[:, i:i+sliced_len]
             rms_slice = rms[:, i:i+sliced_len]
 
@@ -212,7 +212,7 @@ def main(
                 f0=f0_slice,
                 rms=rms_slice,
                 cvec=cvec_slice,
-                whisper=whisper_slice,
+                cvec2=cvec2_slice,
                 steps=infer_steps,
                 cfg_strength=cfg_strength,
                 interpolate_condition=True if interpolate_src > 0 else False,
