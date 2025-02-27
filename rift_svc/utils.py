@@ -87,7 +87,7 @@ def l2_grad_norm(model: torch.nn.Module):
     return torch.cat([p.grad.data.flatten() for p in model.parameters() if p.grad is not None]).norm(2)
 
 
-def interpolate_tensor(tensor, new_size):
+def nearest_interpolate_tensor(tensor, new_size):
     # Add two dummy dimensions to make it [1, 1, n, d]
     tensor = tensor.unsqueeze(0).unsqueeze(0)
     
@@ -98,6 +98,19 @@ def interpolate_tensor(tensor, new_size):
     interpolated = interpolated.squeeze(0).squeeze(0)
     
     return interpolated
+
+
+def linear_interpolate_tensor(tensor, new_size):
+    # Assumes input tensor shape is [n, d]
+    # Rearrange tensor to shape [1, d, n] to prepare for linear interpolation
+    tensor = tensor.transpose(0, 1).unsqueeze(0)
+    
+    # Interpolate along the length dimension (last dimension) using linear interpolation.
+    # align_corners=True preserves the boundary values; adjust this flag if needed.
+    interpolated = F.interpolate(tensor, size=new_size, mode='linear', align_corners=True)
+    
+    # Restore the tensor to shape [new_size, d]
+    return interpolated.squeeze(0).transpose(0, 1)
 
 
 # f0 helpers
@@ -144,3 +157,43 @@ def post_process_f0(f0, sample_rate, hop_length, n_frames, silence_front=0.0, cu
         return f0[:-1]
     else:
         return f0
+
+
+# LR scheduler helpers
+
+from torch.optim.lr_scheduler import _LRScheduler
+
+class LinearDecayWithWarmup(_LRScheduler):
+    def __init__(self, optimizer, num_training_steps, warmup_steps=0, min_lr=0.0, last_epoch=-1):
+        """
+        Args:
+            optimizer (Optimizer): Wrapped optimizer.
+            num_training_steps (int): Total number of training steps.
+            warmup_steps (int): Number of steps to linearly warm-up the learning rate.
+            min_lr (float): The minimum learning rate value after decay.
+            last_epoch (int): The index of the last epoch. Default: -1.
+        """
+        self.num_training_steps = num_training_steps
+        self.warmup_steps = warmup_steps
+        self.min_lr = min_lr
+        super(LinearDecayWithWarmup, self).__init__(optimizer, last_epoch)
+
+    def get_lr(self):
+        """Compute learning rate using a linear schedule with warmup."""
+        # current step is stored in self.last_epoch (which is incremented every call to step())
+        step = self.last_epoch
+
+        # If within warmup phase, increase linearly from 0 to base_lr
+        if step < self.warmup_steps:
+            return [base_lr * float(step) / float(max(1, self.warmup_steps))
+                    for base_lr in self.base_lrs]
+        # If within the decay phase
+        elif step < self.num_training_steps:
+            # progress is a number between 0 and 1 indicating how far along we are in the decay phase
+            progress = float(step - self.warmup_steps) / float(max(1, self.num_training_steps - self.warmup_steps))
+            # linearly interpolate between base_lr and min_lr
+            return [((1.0 - progress) * (base_lr - self.min_lr)) + self.min_lr
+                    for base_lr in self.base_lrs]
+        # If passed all training steps, set lr to min_lr
+        else:
+            return [self.min_lr for _ in self.base_lrs]

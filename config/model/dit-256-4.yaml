@@ -1,6 +1,0 @@
-name: dit-256-4
-cfg:
-  dim: 256
-  depth: 4
-  head_dim: 64
-  ff_mult: 4

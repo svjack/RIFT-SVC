@@ -1,0 +1,6 @@
+n_mel_channels: 128
+head_dim: 64
+ff_mult: 4
+kernel_size: 7
+use_convlinear: false
+use_time_embed: true

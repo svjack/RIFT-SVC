@@ -5,12 +5,12 @@ import torch
 import torch.nn.functional as F
 import torchaudio
 import wandb
-import librosa
+from functools import partial
 
 from pytorch_lightning import LightningModule
 
-from rift_svc.metrics import mcd, psnr, si_snr, snr
-from rift_svc.modules import get_mel_spectrogram
+from rift_svc.metrics import mcd, psnr, si_snr
+from rift_svc.feature_extractors import get_mel_spectrogram
 from rift_svc.nsf_hifigan import NsfHifiGAN
 from rift_svc.utils import draw_mel_specs, l2_grad_norm
 
@@ -20,22 +20,36 @@ class RIFTSVCLightningModule(LightningModule):
         self,
         model,
         optimizer,
-        cfg
+        cfg,
+        lr_scheduler=None
     ):
         super().__init__()
         self.model = model
         self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
         self.cfg = cfg
         self.eval_sample_steps = cfg['training']['eval_sample_steps']
         self.eval_cfg_strength = cfg['training']['eval_cfg_strength']
+        self.model.sample = partial(
+            self.model.sample,
+            steps=self.eval_sample_steps,
+            cfg_strength=self.eval_cfg_strength,
+        )
         self.log_media_per_steps = cfg['training']['log_media_per_steps']
-        self.eval_spk_sim = cfg['training'].get('eval_spk_sim', False)
+        self.drop_spk_prob = cfg['training']['drop_spk_prob']
 
         self.vocoder = None
-        self.spk_encoder = None
         self.save_hyperparameters(ignore=['model', 'optimizer', 'vocoder'])
 
     def configure_optimizers(self):
+        if self.lr_scheduler is not None:
+            return {
+                "optimizer": self.optimizer,
+                "lr_scheduler": {
+                    "scheduler": self.lr_scheduler,
+                    "interval": "step"
+                }
+            }
         return self.optimizer
 
     def training_step(self, batch, batch_idx):
@@ -44,8 +58,16 @@ class RIFTSVCLightningModule(LightningModule):
         f0 = batch['f0']
         rms = batch['rms']
         cvec = batch['cvec']
-        cvec2 = batch['cvec2']
         frame_len = batch['frame_len']
+
+        drop_speaker = False
+        if self.drop_spk_prob > 0:
+            batch_size = spk_id.shape[0]
+            num_drop = int(batch_size * self.drop_spk_prob)
+            drop_speaker = torch.zeros(batch_size, dtype=torch.bool, device=spk_id.device)
+            drop_speaker[:num_drop] = True
+            # Randomly shuffle the drop mask
+            drop_speaker = drop_speaker[torch.randperm(batch_size)]
 
         loss, _ = self.model(
             mel,
@@ -53,15 +75,19 @@ class RIFTSVCLightningModule(LightningModule):
             f0=f0,
             rms=rms,
             cvec=cvec,
-            cvec2=cvec2,
+            drop_speaker=drop_speaker,
             frame_len=frame_len,
         )
 
-        self.log(f'train/loss', loss.item(), prog_bar=True, logger=True)
+        self.logger.experiment.log({
+            "train/loss": loss.item(),
+            
+        }, step=self.global_step+1)
         return loss
     
     def on_validation_start(self):
-        self.optimizer.eval()
+        if hasattr(self.optimizer, 'eval'):
+            self.optimizer.eval()
         if not self.trainer.is_global_zero:
             return
 
@@ -74,20 +100,12 @@ class RIFTSVCLightningModule(LightningModule):
         self.mcd = []
         self.si_snr = []
         self.psnr = []
-        self.snr = []
         self.mse = []
-
-        if self.eval_spk_sim:
-            if self.spk_encoder is None:
-                self.spk_encoder = torch.jit.load('pretrained/ecapa2.pt', map_location='cpu').to(self.device)
-            else:
-                self.spk_encoder = self.spk_encoder.to(self.device)
-
-            self.spk_sim = []
 
 
     def on_validation_end(self, log=True):
-        self.optimizer.train()
+        if hasattr(self.optimizer, 'eval'):
+            self.optimizer.train()
         if not self.trainer.is_global_zero:
             return
 
@@ -95,22 +113,13 @@ class RIFTSVCLightningModule(LightningModule):
             self.vocoder = self.vocoder.cpu()
             gc.collect()
             torch.cuda.empty_cache()
-
-        if self.spk_encoder is not None:
-            self.spk_encoder = self.spk_encoder.cpu()
-            gc.collect()
-            torch.cuda.empty_cache()
         
         metrics = {
             'val/mcd': np.mean(self.mcd),
             'val/si_snr': np.mean(self.si_snr),
             'val/psnr': np.mean(self.psnr),
-            'val/snr': np.mean(self.snr),
             'val/mse': np.mean(self.mse)
         }
-
-        if self.eval_spk_sim:
-            metrics['val/spk_sim'] = np.mean(self.spk_sim)
 
         if log:
             self.logger.experiment.log(metrics, step=self.global_step)
@@ -128,8 +137,8 @@ class RIFTSVCLightningModule(LightningModule):
         rms = batch['rms']
         f0 = batch['f0']
         cvec = batch['cvec']
-        cvec2 = batch['cvec2']
         frame_len = batch['frame_len']
+        cvec_ds = batch.get('cvec_ds', None)
 
         mel_gen, _ = self.model.sample(
             src_mel=mel_gt,
@@ -137,28 +146,11 @@ class RIFTSVCLightningModule(LightningModule):
             f0=f0,
             rms=rms,
             cvec=cvec,
-            cvec2=cvec2,
             frame_len=frame_len,
-            steps=self.eval_sample_steps,
-            cfg_strength=self.eval_cfg_strength,
+            bad_cvec=cvec_ds,
         )
         mel_gen = mel_gen.float()
         mel_gt = mel_gt.float()
-
-        if self.eval_spk_sim:
-            target_spk_id = torch.roll(spk_id, shifts=-1, dims=0)
-            target_mel_gen, _ = self.model.sample(
-                src_mel=mel_gt,
-                spk_id=target_spk_id,
-                f0=f0,
-                rms=rms,
-                cvec=cvec,
-                cvec2=cvec2,
-                frame_len=frame_len,
-                steps=self.eval_sample_steps,
-                cfg_strength=self.eval_cfg_strength,
-            )
-            target_mel_gen = target_mel_gen.float()
 
         for i in range(mel_gen.shape[0]):
             sample_idx = batch_idx * mel_gen.shape[0] + i
@@ -167,32 +159,6 @@ class RIFTSVCLightningModule(LightningModule):
 
             wav_gen = wav_gen.squeeze(0)
             wav_gt = wav_gt.squeeze(0)
-
-            if self.eval_spk_sim:
-                target_wav_gen = self.vocoder(target_mel_gen[i:i+1, :frame_len[i], :].transpose(1, 2), f0[i:i+1, :frame_len[i]])
-                target_wav_gen = target_wav_gen.squeeze(0)
-
-                wav_sr = self.vocoder.h.sampling_rate
-
-                # **Add Low-Pass Filtering Before Resampling using librosa**
-                # Convert tensors to NumPy arrays
-                target_wav_gen_np = target_wav_gen.float().cpu().numpy()
-                wav_gt_np = wav_gt.float().cpu().numpy()
-
-                # Apply low-pass filtering and resample to 16000 Hz
-                target_wav_16khz_np = librosa.resample(target_wav_gen_np, orig_sr=wav_sr, target_sr=16000)
-                wav_gt_16khz_np = librosa.resample(wav_gt_np, orig_sr=wav_sr, target_sr=16000)
-
-                # Convert back to torch tensors
-                target_wav_16khz = torch.from_numpy(target_wav_16khz_np).to(target_wav_gen.device)
-                wav_gt_16khz = torch.from_numpy(wav_gt_16khz_np).to(wav_gt.device)
-
-                spk_embs = self.spk_encoder(wav_gt_16khz)
-                spk_embs = torch.roll(spk_embs, shifts=-1, dims=0)
-                target_spk_embs = self.spk_encoder(target_wav_16khz)
-
-                spk_sim = torch.cosine_similarity(spk_embs, target_spk_embs, dim=-1)
-                self.spk_sim.append(spk_sim.cpu().item())
 
             mel_gen_i = get_mel_spectrogram(wav_gen).transpose(1, 2)
             mel_gt_i = get_mel_spectrogram(wav_gt).transpose(1, 2)
@@ -204,7 +170,6 @@ class RIFTSVCLightningModule(LightningModule):
             self.mcd.append(mcd(mel_gen_i, mel_gt_i).cpu().item())
             self.si_snr.append(si_snr(mel_gen_i, mel_gt_i).cpu().item())
             self.psnr.append(psnr(mel_gen_i, mel_gt_i).cpu().item())
-            self.snr.append(snr(mel_gen_i, mel_gt_i).cpu().item())
             self.mse.append(F.mse_loss(mel_gen_i, mel_gt_i).cpu().item())
 
             if log:
@@ -214,19 +179,12 @@ class RIFTSVCLightningModule(LightningModule):
                     self.logger.experiment.log({
                         f"val-audio/spk-{spk_id[i].item()}_{sample_idx}-gen": wandb.Audio(f".cache/spk-{spk_id[i].item()}_{sample_idx}_gen.wav", sample_rate=44100),
                     }, step=self.global_step)
-
-                    if self.eval_spk_sim:
-                        torchaudio.save(f".cache/spk-{target_spk_id[i].item()}_{sample_idx}_converted.wav", target_wav_gen.cpu().to(torch.float32), 44100)
-                        self.logger.experiment.log({
-                            f"val-audio-converted/spk-{target_spk_id[i].item()}_{sample_idx}": wandb.Audio(f".cache/spk-{target_spk_id[i].item()}_{sample_idx}_converted.wav", sample_rate=44100)
-                        }, step=self.global_step)
                 
                 if global_step == 0:
                     torchaudio.save(f".cache/spk-{spk_id[i].item()}_{sample_idx}_gt.wav", wav_gt.cpu().to(torch.float32), 44100)
                     self.logger.experiment.log({
                         f"val-audio/spk-{spk_id[i].item()}_{sample_idx}-gt": wandb.Audio(f".cache/spk-{spk_id[i].item()}_{sample_idx}_gt.wav", sample_rate=44100)
                     }, step=self.global_step)
-
 
                 if global_step % log_media_every_n_steps == 0:
                     # Compute global min and max for consistent scaling across all plots
@@ -254,7 +212,9 @@ class RIFTSVCLightningModule(LightningModule):
         # Calculate gradient norm
         norm = l2_grad_norm(self.model)
 
-        self.log('train/grad_norm', norm, prog_bar=True, logger=True)
+        self.logger.experiment.log({
+            "train/grad_norm": norm
+        }, step=self.global_step+1)
 
     @property
     def global_step(self):

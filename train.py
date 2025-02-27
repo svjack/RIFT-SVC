@@ -1,18 +1,21 @@
 import os
 import time
-
+os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.expanduser("~/.cache/torchinductor")
 import hydra
 import pytorch_lightning as pl
 from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
+from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
 from schedulefree import AdamWScheduleFree
+from heavyball import ForeachSOAP, ForeachMuon
 from torch.utils.data import DataLoader
 import torch
+torch.set_float32_matmul_precision('high')
 
 from rift_svc import RF, DiT
-from rift_svc.dataset import collate_fn, load_svc_dataset
+from rift_svc.dataset import collate_fn, SVCDataset
 from rift_svc.lightning_module import RIFTSVCLightningModule
+from rift_svc.utils import LinearDecayWithWarmup
 
 
 class CustomProgressBar(TQDMProgressBar):
@@ -59,7 +62,14 @@ class CustomProgressBar(TQDMProgressBar):
         })
 
 
-def configure_optimizers(model, lr, betas, weight_decay, warmup_steps):
+
+optimizer_types = {
+    'soap': ForeachSOAP,
+    'muon': ForeachMuon,
+    'adamwsf': AdamWScheduleFree,
+}
+
+def configure_optimizers(optimizer_type, model, lr, betas, weight_decay, num_training_steps, warmup_steps, min_lr=0.0, **kwargs):
     from collections import defaultdict
     param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
     specp_decay_params = defaultdict(list)
@@ -85,9 +95,17 @@ def configure_optimizers(model, lr, betas, weight_decay, warmup_steps):
         {'params': params, 'weight_decay': weight_decay, 'lr': specp_decay_lr[group_name]}
         for group_name, params in specp_decay_params.items()
     ]
+
+    if optimizer_type == 'adamwsf':
+        optimizer = AdamWScheduleFree(optim_groups, betas=betas, warmup_steps=warmup_steps, **kwargs)
+        return optimizer, None
+    elif optimizer_type in ['soap', 'muon']:
+        optimizer = optimizer_types[optimizer_type](optim_groups, betas=betas, warmup_steps=0, **kwargs)
+        lr_scheduler = LinearDecayWithWarmup(optimizer, num_training_steps=num_training_steps, warmup_steps=warmup_steps)
+        return optimizer, lr_scheduler
+    else:
+        raise NotImplementedError(f"Optimizer type {optimizer_type} not implemented")
     
-    optimizer = AdamWScheduleFree(optim_groups, betas=betas, warmup_steps=warmup_steps)
-    return optimizer
 
 
 def load_state_dict(model, state_dict, strict=False):
@@ -102,53 +120,56 @@ def load_state_dict(model, state_dict, strict=False):
 def main(cfg: DictConfig):
     pl.seed_everything(cfg.seed)
 
-    train_dataset = load_svc_dataset(
-        data_dir=cfg.dataset.data_dir,
-        meta_info_path=cfg.dataset.meta_info_path,
-        max_frame_len=cfg.dataset.max_frame_len,
+    train_dataset = SVCDataset(
+        **cfg.dataset,
+        split="train"
     )
     
-    val_dataset = load_svc_dataset(
-        data_dir=cfg.dataset.data_dir,
-        meta_info_path=cfg.dataset.meta_info_path,
-        max_frame_len=cfg.dataset.max_frame_len,
+    val_dataset = SVCDataset(
+        **cfg.dataset,
         split="test"
     )
 
     transformer = DiT(
-        **cfg.model.cfg,
+        **cfg.model,
         num_speaker=train_dataset.num_speakers,
-        mel_dim=cfg.dataset.n_mel_channels,
     )
 
     rf = RF(
-        transformer=transformer,
-        num_mel_channels=cfg.dataset.n_mel_channels,
-        cvec2_drop_prob=cfg.model.get('cvec2_drop_prob', 0.2),
-        lognorm=cfg.model.get('lognorm', True),
+        transformer=transformer
     )
 
     # Load pretrained weights if specified
-    if cfg.model.get('pretrained_path', None) is not None:
-        state_dict = torch.load(cfg.model.pretrained_path, map_location='cpu')
+    if cfg.training.get('pretrained_path', None) is not None:
+        state_dict = torch.load(cfg.training.pretrained_path, map_location='cpu')
         if 'state_dict' in state_dict:
             state_dict = state_dict['state_dict']
         # Load only model weights, allowing mismatched keys for speaker embeddings
         missing_keys, unexpected_keys = load_state_dict(rf, state_dict)
-        print(f"Loaded pretrained model from {cfg.model.pretrained_path}")
+        print(f"Loaded pretrained model from {cfg.training.pretrained_path}")
         if missing_keys:
             print(f"Missing keys: {missing_keys}")
         if unexpected_keys:
             print(f"Unexpected keys: {unexpected_keys}")
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
-    optimizer = configure_optimizers(
-        rf, cfg.training.learning_rate, eval(cfg.training.betas), cfg.training.weight_decay, warmup_steps)
+    optimizer, lr_scheduler = configure_optimizers(
+        cfg.training.optimizer_type,
+        rf, 
+        cfg.training.learning_rate, 
+        eval(cfg.training.betas), 
+        cfg.training.weight_decay, 
+        cfg.training.max_steps, 
+        warmup_steps,
+        min_lr=cfg.training.get('min_lr', 0.0),
+        **cfg.training.get('optimizer_kwargs', {})
+    )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     cfg_dict['spk2idx'] = train_dataset.spk2idx
     model = RIFTSVCLightningModule(
         model=rf,
         optimizer=optimizer,
+        lr_scheduler=lr_scheduler,
         cfg=cfg_dict
     )
 
@@ -174,6 +195,9 @@ def main(cfg: DictConfig):
         # If no existing config, set it directly
         wandb_logger.experiment.config.update(cfg_dict)
 
+    callbacks = [checkpoint_callback, CustomProgressBar()]
+    if lr_scheduler is not None:
+        callbacks.append(LearningRateMonitor(logging_interval='step'))
 
     trainer = pl.Trainer(
         max_steps=cfg.training.max_steps,
@@ -182,7 +206,7 @@ def main(cfg: DictConfig):
         strategy='auto',
         precision='bf16-mixed',
         accumulate_grad_batches=cfg.training.grad_accumulation_steps,
-        callbacks=[checkpoint_callback, CustomProgressBar()],
+        callbacks=callbacks,
         logger=wandb_logger,
         val_check_interval=cfg.training.test_per_steps,
         check_val_every_n_epoch=None,
@@ -191,7 +215,9 @@ def main(cfg: DictConfig):
         log_every_n_steps=1,
     )
 
-    optimizer.train()
+    if hasattr(optimizer, 'train'):
+        optimizer.train()
+
     trainer.fit(
         model,
         train_dataloaders=DataLoader(
@@ -200,7 +226,6 @@ def main(cfg: DictConfig):
             num_workers=cfg.training.num_workers,
             pin_memory=True,
             persistent_workers=True,
-            #prefetch_factor=1,
             shuffle=True,
             drop_last=True,
             collate_fn=collate_fn,

@@ -1,21 +1,6 @@
 import torch
 
 
-def snr(estimated, target):
-    """Calculate Signal-to-Noise Ratio (SNR)
-    Args:
-        estimated (torch.Tensor): Estimated mel spectrogram [B, len, n_mel]
-        target (torch.Tensor): Target mel spectrogram [B, len, n_mel]
-    Returns:
-        torch.Tensor: SNR value in dB [B]
-    """
-    noise = target - estimated
-    snr = 10 * torch.log10(
-        torch.sum(target ** 2, dim=(1, 2)) / 
-        torch.sum(noise ** 2, dim=(1, 2)) + 1e-8
-    )
-    return snr
-
 def psnr(estimated, target, max_val=None):
     """Calculate Peak Signal-to-Noise Ratio (PSNR)
     Args:

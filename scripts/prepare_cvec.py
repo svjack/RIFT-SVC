@@ -27,7 +27,16 @@ import click
 import torch
 import torchaudio
 from multiprocessing_utils import BaseWorker, run_multiprocessing
-from rift_svc.encoders import HubertModelWithFinalProj
+from rift_svc.feature_extractors import HubertModelWithFinalProj
+
+
+def roll_pad(wav, shift):
+    wav = torch.roll(wav, shift, dims=1)
+    if shift > 0:
+        wav[:, :shift] = 0
+    else:
+        wav[:, shift:] = 0
+    return wav
 
 
 class ContentVectorWorker(BaseWorker):
@@ -51,10 +60,16 @@ class ContentVectorWorker(BaseWorker):
             waveform = resampler(waveform)
 
         with torch.no_grad():
-            contentvec = self.model(waveform)  # Assuming the model returns a dict with 'last_hidden_state'
-            contentvec = contentvec["last_hidden_state"].squeeze(0).cpu()
+            cvec = self.model(waveform)  # Assuming the model returns a dict with 'last_hidden_state'
+            cvec = cvec["last_hidden_state"].squeeze(0).cpu()
 
-        return contentvec
+            waveform = roll_pad(waveform, -160)
+            cvec_shifted = self.model(waveform)["last_hidden_state"].squeeze(0).cpu()
+
+            n, d = cvec.shape
+            cvec = torch.stack([cvec, cvec_shifted], dim=1).view(n*2, d)
+
+        return cvec
 
     def save_output(self, output, output_path):
         """

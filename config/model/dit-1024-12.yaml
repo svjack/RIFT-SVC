@@ -1,6 +1,0 @@
-name: dit-1024-12
-cfg:
-  dim: 1024
-  depth: 12
-  head_dim: 64
-  ff_mult: 4
