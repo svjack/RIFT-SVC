@@ -1,9 +1,9 @@
-from typing import Union, List
+from typing import Union, List, Literal
 from jaxtyping import Bool
 import torch
 from torch import nn
 import torch.nn.functional as F
-
+import math
 from torchdiffeq import odeint
 
 from einops import rearrange
@@ -14,10 +14,25 @@ from rift_svc.utils import (
 ) 
 
 
+def sample_time(time_schedule: Literal['uniform', 'lognorm'], size: int, device: torch.device):
+    if time_schedule == 'uniform':
+        t = torch.rand((size,), device=device)
+    elif time_schedule == 'lognorm':
+        # stratified sampling of normals
+        # first stratified sample from uniform
+        quantiles = torch.linspace(0, 1, size + 1).to(device)
+        z = quantiles[:-1] + torch.rand((size,)).to(device) / size
+        # now transform to normal
+        z = torch.erfinv(2 * z - 1) * math.sqrt(2)
+        t = torch.sigmoid(z)
+    return t
+
+
 class RF(nn.Module):
     def __init__(
         self,
         transformer: nn.Module,
+        time_schedule: Literal['uniform', 'lognorm'] = 'uniform',
         odeint_kwargs: dict = dict(
             method='euler'
         ),
@@ -30,6 +45,7 @@ class RF(nn.Module):
 
         # Sampling related parameters
         self.odeint_kwargs = odeint_kwargs
+        self.time_schedule = time_schedule
 
         self.mel_min = -12
         self.mel_max = 2
@@ -169,7 +185,7 @@ class RF(nn.Module):
         x0 = torch.randn_like(x1)
 
         # uniform time steps sampling
-        time = torch.rand((batch,), dtype=dtype, device=self.device)
+        time = sample_time(self.time_schedule, batch, self.device)
 
         t = rearrange(time, 'b -> b 1 1')
         xt = (1 - t) * x0 + t * x1

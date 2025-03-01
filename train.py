@@ -67,7 +67,8 @@ def main(cfg: DictConfig):
     )
 
     rf = RF(
-        transformer=transformer
+        transformer=transformer,
+        time_schedule=cfg.training.time_schedule,
     )
 
     # Load pretrained weights if specified
