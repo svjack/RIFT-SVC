@@ -1,75 +1,22 @@
 import os
-import time
-os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.path.expanduser("~/.cache/torchinductor")
 import hydra
 import pytorch_lightning as pl
+import torch
 from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar, LearningRateMonitor
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from schedulefree import AdamWScheduleFree
-from heavyball import ForeachSOAP, ForeachMuon
 from torch.utils.data import DataLoader
-import torch
+
+from rift_svc import DiT, RF
+from rift_svc.dataset import SVCDataset, collate_fn
+from rift_svc.lightning_module import RIFTSVCLightningModule
+from rift_svc.utils import CustomProgressBar, load_state_dict
+
 torch.set_float32_matmul_precision('high')
 
-from rift_svc import RF, DiT
-from rift_svc.dataset import collate_fn, SVCDataset
-from rift_svc.lightning_module import RIFTSVCLightningModule
-from rift_svc.utils import LinearDecayWithWarmup
 
-
-class CustomProgressBar(TQDMProgressBar):
-    def __init__(self):
-        super().__init__()
-        self.start_time = None
-        self.step_start_time = None
-        self.total_steps = None
-
-    def on_train_start(self, trainer, pl_module):
-        super().on_train_start(trainer, pl_module)
-        self.start_time = time.time()
-        self.total_steps = trainer.max_steps
-
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
-        
-        current_step = trainer.global_step
-        total_steps = self.total_steps
-
-        # Calculate elapsed time since training started
-        elapsed_time = time.time() - self.start_time
-        
-        # Estimate average step time and remaining time
-        average_step_time = elapsed_time / current_step if current_step > 0 else 0
-        remaining_steps = total_steps - current_step
-        remaining_time = average_step_time * remaining_steps if total_steps > 0 else 0
-
-        # Format times with no leading zeros for hours
-        def format_time(seconds):
-            hours = int(seconds // 3600)
-            minutes = int((seconds % 3600) // 60)
-            seconds = int(seconds % 60)
-            return f"{hours}:{minutes:02d}:{seconds:02d}"
-
-        elapsed_time_str = format_time(elapsed_time)
-        remaining_time_str = format_time(remaining_time)
-
-        # Update the progress bar with loss, elapsed time, remaining time, and remaining steps
-        self.train_progress_bar.set_postfix({
-            "loss": f"{outputs['loss'].item():.4f}",
-            "elapsed_time": elapsed_time_str + "/" + remaining_time_str,
-            "remaining_steps": str(remaining_steps) + "/" + str(total_steps)
-        })
-
-
-
-optimizer_types = {
-    'soap': ForeachSOAP,
-    'muon': ForeachMuon,
-    'adamwsf': AdamWScheduleFree,
-}
-
-def configure_optimizers(optimizer_type, model, lr, betas, weight_decay, num_training_steps, warmup_steps, min_lr=0.0, **kwargs):
+def get_optimizer(model, lr, betas, weight_decay, warmup_steps):
     from collections import defaultdict
     param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
     specp_decay_params = defaultdict(list)
@@ -95,25 +42,9 @@ def configure_optimizers(optimizer_type, model, lr, betas, weight_decay, num_tra
         {'params': params, 'weight_decay': weight_decay, 'lr': specp_decay_lr[group_name]}
         for group_name, params in specp_decay_params.items()
     ]
-
-    if optimizer_type == 'adamwsf':
-        optimizer = AdamWScheduleFree(optim_groups, betas=betas, warmup_steps=warmup_steps, **kwargs)
-        return optimizer, None
-    elif optimizer_type in ['soap', 'muon']:
-        optimizer = optimizer_types[optimizer_type](optim_groups, betas=betas, warmup_steps=0, **kwargs)
-        lr_scheduler = LinearDecayWithWarmup(optimizer, num_training_steps=num_training_steps, warmup_steps=warmup_steps)
-        return optimizer, lr_scheduler
-    else:
-        raise NotImplementedError(f"Optimizer type {optimizer_type} not implemented")
     
-
-
-def load_state_dict(model, state_dict, strict=False):
-    """Load state dict while handling 'model.' prefix"""
-    if any(k.startswith('model.') for k in state_dict.keys()):
-        # Remove 'model.' prefix
-        state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
-    return model.load_state_dict(state_dict, strict=strict)
+    optimizer = AdamWScheduleFree(optim_groups, betas=betas, warmup_steps=warmup_steps)
+    return optimizer
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
@@ -153,23 +84,18 @@ def main(cfg: DictConfig):
             print(f"Unexpected keys: {unexpected_keys}")
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
-    optimizer, lr_scheduler = configure_optimizers(
-        cfg.training.optimizer_type,
+    optimizer = get_optimizer(
         rf, 
         cfg.training.learning_rate, 
         eval(cfg.training.betas), 
         cfg.training.weight_decay, 
-        cfg.training.max_steps, 
         warmup_steps,
-        min_lr=cfg.training.get('min_lr', 0.0),
-        **cfg.training.get('optimizer_kwargs', {})
     )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     cfg_dict['spk2idx'] = train_dataset.spk2idx
     model = RIFTSVCLightningModule(
         model=rf,
         optimizer=optimizer,
-        lr_scheduler=lr_scheduler,
         cfg=cfg_dict
     )
 
@@ -196,8 +122,6 @@ def main(cfg: DictConfig):
         wandb_logger.experiment.config.update(cfg_dict)
 
     callbacks = [checkpoint_callback, CustomProgressBar()]
-    if lr_scheduler is not None:
-        callbacks.append(LearningRateMonitor(logging_interval='step'))
 
     trainer = pl.Trainer(
         max_steps=cfg.training.max_steps,

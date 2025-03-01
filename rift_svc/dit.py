@@ -15,7 +15,7 @@ from rift_svc.modules import (
     TimestepEmbedding,
     ConvLinear,
 )
-
+ 
 # Conditional embedding for f0, rms, cvec
 class CondEmbedding(nn.Module):
     def __init__(self, cvec_dim: int, cond_dim: int, use_convlinear: bool = False, kernel_size: int = 7):
@@ -77,15 +77,13 @@ class DiT(nn.Module):
                  dim: int, depth: int, head_dim: int = 64, dropout: float = 0.0, ff_mult: int = 4,
                  n_mel_channels: int = 128, num_speaker: int = 1, cvec_dim: int = 768, 
                  kernel_size: int = 7,
-                 init_std: float = 1, use_convlinear: bool = False, use_time_embed: bool = True):
+                 init_std: float = 1, use_convlinear: bool = False):
         super().__init__()
     
         self.num_speaker = num_speaker
         self.spk_embed = nn.Embedding(num_speaker, dim)
         self.null_spk_embed = nn.Embedding(1, dim)
-        self.use_time_embed = use_time_embed
-        if use_time_embed:
-            self.time_embed = TimestepEmbedding(dim)
+        self.tembed = TimestepEmbedding(dim)
         self.cond_embed = CondEmbedding(cvec_dim, dim, use_convlinear=use_convlinear, kernel_size=kernel_size)   
         self.input_embed = InputEmbedding(n_mel_channels, dim)
 
@@ -164,11 +162,8 @@ class DiT(nn.Module):
         null_spk_embeds = self.null_spk_embed(torch.zeros_like(spk, dtype=torch.long))
         spk_embeds = torch.where(drop_speaker.unsqueeze(-1), null_spk_embeds, spk_embeds)
 
-        if self.use_time_embed:
-            t = self.time_embed(time)
-            t = t + spk_embeds
-        else:
-            t = spk_embeds
+        t = self.tembed(time)
+        t = t + spk_embeds
 
         cond_embed = self.cond_embed(f0, rms, cvec)
         x = self.input_embed(x, cond_embed)

@@ -1,6 +1,7 @@
 import io
 import os
 import random
+import time
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from jaxtyping import Bool, Int
 from PIL import Image
+from pytorch_lightning.callbacks import TQDMProgressBar
 
 
 def seed_everything(seed: int = 0):
@@ -158,42 +160,57 @@ def post_process_f0(f0, sample_rate, hop_length, n_frames, silence_front=0.0, cu
     else:
         return f0
 
+# progress bar helper
 
-# LR scheduler helpers
+class CustomProgressBar(TQDMProgressBar):
+    def __init__(self):
+        super().__init__()
+        self.start_time = None
+        self.step_start_time = None
+        self.total_steps = None
 
-from torch.optim.lr_scheduler import _LRScheduler
+    def on_train_start(self, trainer, pl_module):
+        super().on_train_start(trainer, pl_module)
+        self.start_time = time.time()
+        self.total_steps = trainer.max_steps
 
-class LinearDecayWithWarmup(_LRScheduler):
-    def __init__(self, optimizer, num_training_steps, warmup_steps=0, min_lr=0.0, last_epoch=-1):
-        """
-        Args:
-            optimizer (Optimizer): Wrapped optimizer.
-            num_training_steps (int): Total number of training steps.
-            warmup_steps (int): Number of steps to linearly warm-up the learning rate.
-            min_lr (float): The minimum learning rate value after decay.
-            last_epoch (int): The index of the last epoch. Default: -1.
-        """
-        self.num_training_steps = num_training_steps
-        self.warmup_steps = warmup_steps
-        self.min_lr = min_lr
-        super(LinearDecayWithWarmup, self).__init__(optimizer, last_epoch)
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+        
+        current_step = trainer.global_step
+        total_steps = self.total_steps
 
-    def get_lr(self):
-        """Compute learning rate using a linear schedule with warmup."""
-        # current step is stored in self.last_epoch (which is incremented every call to step())
-        step = self.last_epoch
+        # Calculate elapsed time since training started
+        elapsed_time = time.time() - self.start_time
+        
+        # Estimate average step time and remaining time
+        average_step_time = elapsed_time / current_step if current_step > 0 else 0
+        remaining_steps = total_steps - current_step
+        remaining_time = average_step_time * remaining_steps if total_steps > 0 else 0
 
-        # If within warmup phase, increase linearly from 0 to base_lr
-        if step < self.warmup_steps:
-            return [base_lr * float(step) / float(max(1, self.warmup_steps))
-                    for base_lr in self.base_lrs]
-        # If within the decay phase
-        elif step < self.num_training_steps:
-            # progress is a number between 0 and 1 indicating how far along we are in the decay phase
-            progress = float(step - self.warmup_steps) / float(max(1, self.num_training_steps - self.warmup_steps))
-            # linearly interpolate between base_lr and min_lr
-            return [((1.0 - progress) * (base_lr - self.min_lr)) + self.min_lr
-                    for base_lr in self.base_lrs]
-        # If passed all training steps, set lr to min_lr
-        else:
-            return [self.min_lr for _ in self.base_lrs]
+        # Format times with no leading zeros for hours
+        def format_time(seconds):
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            seconds = int(seconds % 60)
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+        elapsed_time_str = format_time(elapsed_time)
+        remaining_time_str = format_time(remaining_time)
+
+        # Update the progress bar with loss, elapsed time, remaining time, and remaining steps
+        self.train_progress_bar.set_postfix({
+            "loss": f"{outputs['loss'].item():.4f}",
+            "elapsed_time": elapsed_time_str + "/" + remaining_time_str,
+            "remaining_steps": str(remaining_steps) + "/" + str(total_steps)
+        })
+
+
+# state dict helpers
+
+def load_state_dict(model, state_dict, strict=False):
+    """Load state dict while handling 'model.' prefix"""
+    if any(k.startswith('model.') for k in state_dict.keys()):
+        # Remove 'model.' prefix
+        state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
+    return model.load_state_dict(state_dict, strict=strict)
