@@ -1,12 +1,12 @@
+#!/usr/bin/env python3
 """
 generate_mel_specs.py
 
-This script reads a meta-information JSON file containing speakers and their corresponding audio files,
-generates Mel spectrograms for each audio file using multiprocessing, and saves the spectrograms
-as .mel.pt files in the same directory as the original audio files.
+该脚本从meta_info.json中读取音频信息，对每个音频生成Mel spectrogram，
+并以 .mel.pt 格式保存在相应目录下。
 
 Usage:
-    python prepare_mel.py --meta-info META_INFO_JSON --data-dir DATA_DIR [OPTIONS]
+    python prepare_mel.py --data-dir DATA_DIR [OPTIONS]
 
 Options:
     --data-dir DIRECTORY         Path to the root of the preprocessed dataset directory. (Required)
@@ -23,65 +23,49 @@ from pathlib import Path
 import torch
 import torchaudio
 import click
-from tqdm import tqdm
-from multiprocessing import Pool, cpu_count, Manager
 from functools import partial
+from tqdm import tqdm
 
 from rift_svc.modules import get_mel_spectrogram
+from multiprocessing_utils import run_parallel, get_device
 
-
-def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verbose, overwrite):
+def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verbose, overwrite, device):
     """
-    Process a single audio file: load, generate Mel spectrogram, save, and return frame length.
-
-    Parameters:
-        audio (dict): Dictionary containing audio metadata.
-        data_dir (str): Root directory of the preprocessed dataset.
-        hop_length (int): Hop length for Mel spectrogram.
-        n_mel_channels (int): Number of Mel channels.
-        sample_rate (int): Target sample rate in Hz.
-        verbose (bool): Flag to enable verbose output.
-        overwrite (bool): Flag to overwrite existing Mel spectrograms.
-    Returns:
-        tuple or None: Returns a tuple (audio_type, index, frame_len) if successful, else None.
+    处理单个音频：读取WAV文件，生成Mel spectrogram，并保存为 .mel.pt 文件。
     """
     speaker = audio.get('speaker')
     file_name = audio.get('file_name')
-    audio_type = audio.get('type')
-    index = audio.get('index')
-
+    # 如果信息不全则跳过
     if not speaker or not file_name:
         if verbose:
             click.echo(f"Skipping invalid entry: {audio}", err=True)
-        return None
+        return
 
-    # Construct paths
     wav_path = Path(data_dir) / speaker / f"{file_name}.wav"
     mel_path = Path(data_dir) / speaker / f"{file_name}.mel.pt"
 
     if mel_path.is_file() and not overwrite:
         if verbose:
             click.echo(f"Skipping existing Mel spectrogram: {mel_path}", err=True)
-        return None
+        return
 
     if not wav_path.is_file():
         if verbose:
             click.echo(f"Warning: WAV file not found: {wav_path}", err=True)
-        return None
+        return
 
     try:
-        # Load audio
         waveform, sr = torchaudio.load(str(wav_path))
-
-        # Ensure waveform has proper shape
+        # 确保形状正确
         if len(waveform.shape) == 1:
             waveform = waveform.unsqueeze(0)
         elif len(waveform.shape) == 2 and waveform.shape[0] != 1:
             waveform = waveform.mean(dim=0, keepdim=True)
 
-        # Generate Mel spectrogram
+        waveform = waveform.to(device)
+
         mel = get_mel_spectrogram(
-            waveform.cuda(),
+            waveform,
             hop_size=hop_length,
             num_mels=n_mel_channels,
             sampling_rate=sample_rate,
@@ -90,9 +74,8 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
             fmin=40,
             fmax=16000,
         )
-        mel = mel.cpu()  # Move to CPU for saving
+        mel = mel.cpu()  # 转回CPU保存
 
-        # Save the Mel spectrogram directly to disk
         torch.save(mel, mel_path)
 
         if verbose:
@@ -106,52 +89,51 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
-    help='Path to the root of the preprocessed dataset directory.'
+    help='预处理数据集的根目录。'
 )
 @click.option(
     '--hop-length',
     type=int,
     default=512,
     show_default=True,
-    help='Hop length for Mel spectrogram.'
+    help='Mel spectrogram的hop length。'
 )
 @click.option(
     '--n-mel-channels',
     type=int,
     default=128,
     show_default=True,
-    help='Number of Mel channels.'
+    help='Mel通道数。'
 )
 @click.option(
     '--sample-rate',
     type=int,
     default=44100,
     show_default=True,
-    help='Target sample rate in Hz.'
+    help='目标采样率（Hz）。'
 )
 @click.option(
     '--num-workers',
     type=int,
-    default=cpu_count(),
+    default=4,
     show_default=True,
-    help='Number of workers.'
+    help='并行进程数。'
 )
 @click.option(
     '--overwrite',
     is_flag=True,
     default=False,
-    help='Overwrite existing Mel spectrograms.'
+    help='是否覆盖已存在的Mel spectrogram。'
 )
 @click.option(
     '--verbose',
     is_flag=True,
     default=False,
-    help='Enable verbose output.'
+    help='是否打印详细日志。'
 )
 def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_workers, verbose, overwrite):
     """
-    Generate Mel spectrograms for each audio file specified in the meta_info.json and save them as .mel.pt files.
-    This version uses multiprocessing for enhanced efficiency.
+    对meta_info.json中的音频生成Mel spectrogram，并保存为 .mel.pt 文件。
     """
     meta_info = Path(data_dir) / "meta_info.json"
     try:
@@ -161,31 +143,23 @@ def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_wo
         click.echo(f"Error reading meta_info.json: {e}", err=True)
         sys.exit(1)
 
-    speakers = meta.get('speakers', [])
     train_audios = meta.get('train_audios', [])
     test_audios = meta.get('test_audios', [])
-
-    # Combine train and test audios with labels
-    all_audios = [{'type': 'train', 'index': i, **audio} for i, audio in enumerate(train_audios)] + \
-                 [{'type': 'test', 'index': i, **audio} for i, audio in enumerate(test_audios)]
+    all_audios = (
+        [{'type': 'train', 'index': i, **audio} for i, audio in enumerate(train_audios)] +
+        [{'type': 'test', 'index': i, **audio} for i, audio in enumerate(test_audios)]
+    )
 
     if not all_audios:
         click.echo("No audio files found in meta_info.json.", err=True)
         sys.exit(1)
 
-    # Set device
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    device = get_device()
     if verbose:
         click.echo(f"Using device: {device}")
 
-    # Disable gradient computation
     torch.set_grad_enabled(False)
 
-    # Initialize multiprocessing Pool
-    if verbose:
-        click.echo(f"Starting multiprocessing with {num_workers} workers...")
-
-    # Create a partial function with fixed parameters
     process_func = partial(
         process_audio,
         data_dir=data_dir,
@@ -193,22 +167,12 @@ def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_wo
         n_mel_channels=n_mel_channels,
         sample_rate=sample_rate,
         verbose=verbose,
-        overwrite=overwrite
+        overwrite=overwrite,
+        device=device
     )
 
-    num_workers = min(16, num_workers)
-    with Pool(processes=num_workers) as pool:
-        # Use imap_unordered for better performance
-        tqdm(
-            pool.imap_unordered(process_func, all_audios),
-            total=len(all_audios),
-            desc="Generating Mel Spectrograms",
-            unit="file"
-        )
-
-
+    run_parallel(all_audios, process_func, num_workers=num_workers, desc="Generating Mel Spectrograms")
     click.echo("Mel spectrogram generation complete.")
-
 
 if __name__ == "__main__":
     generate_mel_specs()
