@@ -78,30 +78,12 @@ class ConvMLP(nn.Module):
         return x
 
 
-class ConvLinear(nn.Module):
-    def __init__(self, dim: int, dim_out: int | None = None, kernel_size: int = 7):
-        super().__init__()
-        dim_out = dim_out if dim_out is not None else dim
-        padding = kernel_size // 2
-        self.dwconv = nn.Conv1d(dim, dim_out, kernel_size=kernel_size, padding=padding, groups=dim)
-        self.proj = nn.Linear(dim, dim_out)
-
-    def forward(self, x):
-        x = x.permute(0, 2, 1)
-        x = self.dwconv(x)
-        x = x.permute(0, 2, 1)
-        x = self.proj(x)
-        return x
-
-
 class Attention(nn.Module):
     def __init__(
         self,
         dim: int,
         head_dim: int = 64,
         dropout: float = 0.0,
-        use_convlinear: bool = False,
-        kernel_size: int = 7,
     ):
         super().__init__()
 
@@ -116,9 +98,9 @@ class Attention(nn.Module):
         self.dropout = dropout
         self.scale = 1 / dim
 
-        self.q_proj = ConvLinear(dim, kernel_size=kernel_size, dim_out=self.inner_dim) if use_convlinear else nn.Linear(dim, self.inner_dim)
-        self.k_proj = ConvLinear(dim, kernel_size=kernel_size, dim_out=self.inner_dim) if use_convlinear else nn.Linear(dim, self.inner_dim)
-        self.v_proj = ConvLinear(dim, kernel_size=kernel_size, dim_out=self.inner_dim) if use_convlinear else nn.Linear(dim, self.inner_dim)
+        self.q_proj = nn.Linear(dim, self.inner_dim)
+        self.k_proj = nn.Linear(dim, self.inner_dim)
+        self.v_proj = nn.Linear(dim, self.inner_dim)
 
         self.norm_q = nn.LayerNorm(self.head_dim, elementwise_affine=False, eps=1e-6)
         self.norm_k = nn.LayerNorm(self.head_dim, elementwise_affine=False, eps=1e-6)
@@ -185,8 +167,7 @@ class DiTBlock(nn.Module):
 
     def __init__(
             self, dim: int, head_dim: int, ff_mult: float = 4, 
-            dropout: float = 0.0, kernel_size: int = 7, 
-            use_convlinear: bool = False):
+            dropout: float = 0.0, kernel_size: int = 31):
         super().__init__()
 
         self.attn_norm = AdaLayerNormZero(dim)
@@ -194,8 +175,6 @@ class DiTBlock(nn.Module):
             dim = dim,
             head_dim = head_dim,
             dropout = dropout,
-            use_convlinear = use_convlinear,
-            kernel_size = kernel_size,
         )
         
         self.mlp_norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)

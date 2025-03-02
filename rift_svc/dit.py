@@ -13,12 +13,11 @@ from rift_svc.modules import (
     DiTBlock,
     ConvMLP,
     TimestepEmbedding,
-    ConvLinear,
 )
  
 # Conditional embedding for f0, rms, cvec
 class CondEmbedding(nn.Module):
-    def __init__(self, cvec_dim: int, cond_dim: int, use_convlinear: bool = False, kernel_size: int = 7):
+    def __init__(self, cvec_dim: int, cond_dim: int):
         super().__init__()
         self.cvec_dim = cvec_dim
         self.cond_dim = cond_dim
@@ -26,10 +25,7 @@ class CondEmbedding(nn.Module):
         self.f0_embed = nn.Linear(1, cond_dim)
         self.rms_embed = nn.Linear(1, cond_dim)
         self.cvec_embed = nn.Linear(cvec_dim, cond_dim)
-        if use_convlinear:
-            self.out = ConvLinear(cond_dim, cond_dim, kernel_size=kernel_size)
-        else:
-            self.out = nn.Linear(cond_dim, cond_dim)
+        self.out = nn.Linear(cond_dim, cond_dim)
 
         self.ln_cvec = nn.LayerNorm(cond_dim, elementwise_affine=False, eps=1e-6)
         self.ln = nn.LayerNorm(cond_dim, elementwise_affine=True, eps=1e-6)
@@ -76,15 +72,15 @@ class DiT(nn.Module):
     def __init__(self,
                  dim: int, depth: int, head_dim: int = 64, dropout: float = 0.0, ff_mult: int = 4,
                  n_mel_channels: int = 128, num_speaker: int = 1, cvec_dim: int = 768, 
-                 kernel_size: int = 7,
-                 init_std: float = 1, use_convlinear: bool = False):
+                 kernel_size: int = 31,
+                 init_std: float = 1):
         super().__init__()
     
         self.num_speaker = num_speaker
         self.spk_embed = nn.Embedding(num_speaker, dim)
         self.null_spk_embed = nn.Embedding(1, dim)
         self.tembed = TimestepEmbedding(dim)
-        self.cond_embed = CondEmbedding(cvec_dim, dim, use_convlinear=use_convlinear, kernel_size=kernel_size)   
+        self.cond_embed = CondEmbedding(cvec_dim, dim)   
         self.input_embed = InputEmbedding(n_mel_channels, dim)
 
         self.rotary_embed = RotaryEmbedding(head_dim)
@@ -98,7 +94,6 @@ class DiT(nn.Module):
                     head_dim = head_dim,
                     ff_mult = ff_mult,
                     dropout = dropout,
-                    use_convlinear = use_convlinear,
                     kernel_size = kernel_size,
                 )
                 for _ in range(depth)
