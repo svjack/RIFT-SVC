@@ -3,48 +3,17 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig, OmegaConf
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers import WandbLogger
-from schedulefree import AdamWScheduleFree
 from torch.utils.data import DataLoader
 
 from rift_svc import DiT, RF
 from rift_svc.dataset import SVCDataset, collate_fn
 from rift_svc.lightning_module import RIFTSVCLightningModule
 from rift_svc.utils import CustomProgressBar, load_state_dict
+from rift_svc.optim import get_optimizer
 
 torch.set_float32_matmul_precision('high')
-
-
-def get_optimizer(model, lr, betas, weight_decay, warmup_steps):
-    from collections import defaultdict
-    param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
-    specp_decay_params = defaultdict(list)
-    specp_decay_lr = {}
-    decay_params = []
-    nodecay_params = []
-    for n, p in param_dict.items():
-        if p.dim() >= 2:
-            if n.endswith('out.weight') or n.endswith('proj.weight'):
-                fan_out, fan_in = p.shape[-2:]
-                fan_ratio = fan_out / fan_in
-                specp_decay_params[f"specp_decay_{fan_ratio:.2f}"].append(p)
-                specp_decay_lr[f"specp_decay_{fan_ratio:.2f}"] = lr * fan_ratio
-            else:
-                decay_params.append(p)
-        else:
-            nodecay_params.append(p)
-    
-    optim_groups = [
-        {'params': decay_params, 'weight_decay': weight_decay, 'lr': lr},
-        {'params': nodecay_params, 'weight_decay': 0.0, 'lr': lr}
-    ] + [
-        {'params': params, 'weight_decay': weight_decay, 'lr': specp_decay_lr[group_name]}
-        for group_name, params in specp_decay_params.items()
-    ]
-    
-    optimizer = AdamWScheduleFree(optim_groups, betas=betas, warmup_steps=warmup_steps)
-    return optimizer
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
@@ -85,18 +54,22 @@ def main(cfg: DictConfig):
             print(f"Unexpected keys: {unexpected_keys}")
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
-    optimizer = get_optimizer(
+    optimizer, lr_scheduler = get_optimizer(
+        cfg.training.optimizer_type,
         rf, 
         cfg.training.learning_rate, 
         eval(cfg.training.betas), 
         cfg.training.weight_decay, 
         warmup_steps,
+        max_steps=cfg.training.max_steps,
+        min_lr=cfg.training.get('min_lr', 0.0),
     )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     cfg_dict['spk2idx'] = train_dataset.spk2idx
     model = RIFTSVCLightningModule(
         model=rf,
         optimizer=optimizer,
+        lr_scheduler=lr_scheduler,
         cfg=cfg_dict
     )
 
@@ -123,6 +96,8 @@ def main(cfg: DictConfig):
         wandb_logger.experiment.config.update(cfg_dict)
 
     callbacks = [checkpoint_callback, CustomProgressBar()]
+    if lr_scheduler is not None:
+        callbacks.append(LearningRateMonitor(logging_interval='step'))
 
     trainer = pl.Trainer(
         max_steps=cfg.training.max_steps,

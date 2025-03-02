@@ -21,10 +21,12 @@ class RIFTSVCLightningModule(LightningModule):
         model,
         optimizer,
         cfg,
+        lr_scheduler=None,
     ):
         super().__init__()
         self.model = model
         self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
         self.cfg = cfg
         self.eval_sample_steps = cfg['training']['eval_sample_steps']
         self.model.sample = partial(
@@ -38,7 +40,15 @@ class RIFTSVCLightningModule(LightningModule):
         self.save_hyperparameters(ignore=['model', 'optimizer', 'vocoder'])
 
     def configure_optimizers(self):
-        return self.optimizer
+        if self.lr_scheduler is None:
+            return self.optimizer
+        return {
+            "optimizer": self.optimizer,
+            "lr_scheduler": {
+                "scheduler": self.lr_scheduler,
+                "interval": "step",
+            }
+        }
 
     def training_step(self, batch, batch_idx):
         mel = batch['mel']
