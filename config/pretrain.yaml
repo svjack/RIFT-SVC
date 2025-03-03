@@ -31,4 +31,4 @@ training:
   num_workers: 8
   eval_sample_steps: 32
   drop_spk_prob: 0.2
-  time_schedule: "uniform"
+  time_schedule: "lognorm"

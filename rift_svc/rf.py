@@ -32,7 +32,7 @@ class RF(nn.Module):
     def __init__(
         self,
         transformer: nn.Module,
-        time_schedule: Literal['uniform', 'lognorm'] = 'uniform',
+        time_schedule: Literal['uniform', 'lognorm'] = 'lognorm',
         odeint_kwargs: dict = dict(
             method='euler'
         ),
