@@ -11,6 +11,7 @@ Usage:
 
 import json
 import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pathlib import Path
 import torch
 import torchaudio
@@ -18,13 +19,15 @@ import click
 from functools import partial
 
 from multiprocessing_utils import run_parallel, get_device
+from rift_svc.feature_extractors import RMSExtractor
+
 
 def get_rms_extractor(hop_length):
     """
     懒加载RMSExtractor，每个进程首次调用时加载并缓存。
     """
     if not hasattr(get_rms_extractor, "extractor"):
-        from rift_svc.modules import RMSExtractor
+        
         device = get_device()
         extractor = RMSExtractor(hop_length=hop_length).to(device)
         extractor.eval()

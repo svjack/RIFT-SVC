@@ -28,6 +28,8 @@ import torchaudio
 from functools import partial
 
 from multiprocessing_utils import run_parallel, get_device
+from rift_svc.feature_extractors import HubertModelWithFinalProj
+
 
 def roll_pad(wav, shift):
     wav = torch.roll(wav, shift, dims=1)
@@ -37,12 +39,13 @@ def roll_pad(wav, shift):
         wav[:, shift:] = 0
     return wav
 
+CVEC_SAMPLE_RATE = 16000
+
 def get_cvec_model(model_path):
     """
     懒加载HuBERT模型，每个进程首次调用时加载并缓存。
     """
     if not hasattr(get_cvec_model, "model"):
-        from rift_svc.feature_extractors import HubertModelWithFinalProj
         device = get_device()
         model = HubertModelWithFinalProj.from_pretrained(model_path)
         model = model.to(device)
@@ -77,14 +80,17 @@ def process_cvec(audio, data_dir, model_path, overwrite, verbose):
     
     try:
         waveform, sr = torchaudio.load(str(wav_path))
+        model, device = get_cvec_model(model_path)
+        waveform = waveform.to(device)
+
         if waveform.dim() == 1:
             waveform = waveform.unsqueeze(0)
         elif waveform.dim() == 2 and waveform.shape[0] != 1:
             waveform = waveform.mean(dim=0, keepdim=True)
-        
-        # 每个进程内部首次加载模型
-        model, device = get_cvec_model(model_path)
-        waveform = waveform.to(device)
+
+        if sr != CVEC_SAMPLE_RATE:
+            waveform = torchaudio.functional.resample(waveform, sr, CVEC_SAMPLE_RATE)
+
         with torch.no_grad():
             output = model(waveform)  # 返回字典，包含 "last_hidden_state"
             cvec = output["last_hidden_state"].squeeze(0).cpu()

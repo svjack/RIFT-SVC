@@ -19,7 +19,8 @@ Options:
 """
 
 import json
-import sys
+import sys, os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pathlib import Path
 
 import click
@@ -29,21 +30,20 @@ from functools import partial
 import multiprocessing
 
 from multiprocessing_utils import run_parallel, get_device
+from rift_svc.rmvpe.inference import RMVPE
 
-def get_f0_model(model_path, hop_length, sample_rate):
+RMVPE_HOP_LENGTH = 160
+
+def get_f0_model(model_path):
     """
     懒加载RMVPE模型，每个进程首次调用时加载并缓存。
     """
     if not hasattr(get_f0_model, "model"):
-        from rift_svc.rmvpe.inference import RMVPE
         device = get_device()
-        model = RMVPE(model_path=model_path, hop_length=hop_length, device=device)
-        model.eval()
+        model = RMVPE(model_path=model_path, hop_length=RMVPE_HOP_LENGTH, device=device)
         get_f0_model.model = model
         get_f0_model.device = device
-        get_f0_model.hop_length = hop_length
-        get_f0_model.sample_rate = sample_rate
-    return get_f0_model.model, get_f0_model.device, get_f0_model.hop_length, get_f0_model.sample_rate
+    return get_f0_model.model, get_f0_model.device
 
 def process_f0(audio, data_dir, model_path, hop_length, sample_rate, overwrite, verbose):
     """
@@ -68,32 +68,32 @@ def process_f0(audio, data_dir, model_path, hop_length, sample_rate, overwrite, 
         return
     try:
         waveform, sr = torchaudio.load(str(wav_path))
+        model, device = get_f0_model(model_path)
+        waveform = waveform.to(device)
+
         if waveform.dim() == 1:
             waveform = waveform.unsqueeze(0)
         elif waveform.dim() == 2 and waveform.shape[0] != 1:
             waveform = waveform.mean(dim=0, keepdim=True)
-        # 获取本进程中的RMVPE模型实例
-        model, device, f0_hop_length, f0_sample_rate = get_f0_model(model_path, hop_length, sample_rate)
-        waveform = waveform.to(device)
-        if sr != f0_sample_rate:
-            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=f0_sample_rate).to(device)
-            waveform = resampler(waveform)
+        
+        if sr != sample_rate:
+            waveform = torchaudio.functional.resample(waveform, sr, sample_rate)
         
         with torch.no_grad():
             f0 = model.infer_from_audio(
                 waveform,
-                sample_rate=f0_sample_rate,
+                sample_rate=sample_rate,
                 device=device,
                 thred=0.03,
                 use_viterbi=False
             )
-        n_frames = int(waveform.shape[-1] // f0_hop_length) + 1
+        n_frames = int(waveform.shape[-1] // hop_length) + 1
 
         from rift_svc.utils import post_process_f0
         f0_processed = post_process_f0(
             f0=f0,
-            sample_rate=f0_sample_rate,
-            hop_length=f0_hop_length,
+            sample_rate=sample_rate,
+            hop_length=hop_length,
             n_frames=n_frames,
             silence_front=0.0
         )
@@ -114,13 +114,14 @@ def process_f0(audio, data_dir, model_path, hop_length, sample_rate, overwrite, 
 @click.option(
     '--model-path',
     type=click.Path(exists=True, file_okay=True, readable=True),
-    required=True,
+    required=False,
+    default="pretrained/rmvpe/model.pt",
     help='预训练RMVPE模型路径。'
 )
 @click.option(
     '--hop-length',
     type=int,
-    default=256,
+    default=512,
     show_default=True,
     help='f0提取的hop length。'
 )

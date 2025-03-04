@@ -24,9 +24,8 @@ import torch
 import torchaudio
 import click
 from functools import partial
-from tqdm import tqdm
 
-from rift_svc.modules import get_mel_spectrogram
+from rift_svc.feature_extractors import get_mel_spectrogram
 from multiprocessing_utils import run_parallel, get_device
 
 def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verbose, overwrite, device):
