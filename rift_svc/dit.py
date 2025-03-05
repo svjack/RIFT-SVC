@@ -11,8 +11,8 @@ from x_transformers.x_transformers import RotaryEmbedding
 from rift_svc.modules import (
     AdaLayerNormZero_Final,
     DiTBlock,
-    ConvMLP,
     TimestepEmbedding,
+    LoRALinear,
 )
  
 # Conditional embedding for f0, rms, cvec
@@ -72,7 +72,7 @@ class DiT(nn.Module):
     def __init__(self,
                  dim: int, depth: int, head_dim: int = 64, dropout: float = 0.0, ff_mult: int = 4,
                  n_mel_channels: int = 128, num_speaker: int = 1, cvec_dim: int = 768, 
-                 kernel_size: int = 31,
+                 kernel_size: int = 31, zero_null_spk: bool = False,
                  init_std: float = 1):
         super().__init__()
     
@@ -113,6 +113,10 @@ class DiT(nn.Module):
         torch.nn.init.constant_(self.norm_out.proj.bias, 0)
         torch.nn.init.constant_(self.output.weight, 0)
         torch.nn.init.constant_(self.output.bias, 0)
+
+        if zero_null_spk:
+            self.null_spk_embed.weight.data.zero_()
+            self.null_spk_embed.requires_grad = False
 
     def _init_weights(self, module: nn.Module):
         if isinstance(module, nn.Linear):
@@ -178,3 +182,36 @@ class DiT(nn.Module):
         output = self.output(x)
 
         return output
+    
+
+    def apply_lora(self, rank, alpha):
+        for n, p in self.named_parameters():
+            p.requires_grad = False
+        self.spk_embed.weight.requires_grad = True
+        # Apply LoRA to k_proj and v_proj in each attention block
+        for block in self.transformer_blocks:
+            block.attn.k_proj = LoRALinear(block.attn.k_proj, rank, alpha)
+            block.attn.v_proj = LoRALinear(block.attn.v_proj, rank, alpha)
+
+
+    def merge_lora(self):
+        # Iterate over each transformer block in the DiT backbone
+        for block in self.transformer_blocks:
+            # Merge for k_proj if it is a LoRALinear instance
+            if isinstance(block.attn.k_proj, LoRALinear):
+                with torch.no_grad():
+                    # Compute delta update: B @ A^T
+                    delta = block.attn.k_proj.B @ block.attn.k_proj.A.T
+                    # The underlying linear layer has weight of shape (out_features, in_features)
+                    # and its forward computes x * weight.T
+                    # Note: delta.T equals A @ B^T, so merging works correctly:
+                    block.attn.k_proj.linear.weight.add_(delta)
+                # Replace the LoRALinear module with the merged linear layer
+                block.attn.k_proj = block.attn.k_proj.linear
+
+            # Merge for v_proj in the same way
+            if isinstance(block.attn.v_proj, LoRALinear):
+                with torch.no_grad():
+                    delta = block.attn.v_proj.B @ block.attn.v_proj.A.T
+                    block.attn.v_proj.linear.weight.add_(delta)
+                block.attn.v_proj = block.attn.v_proj.linear

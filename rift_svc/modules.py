@@ -10,6 +10,31 @@ import torch.nn.functional as F
 from x_transformers.x_transformers import apply_rotary_pos_emb
 
 
+class LoRALinear(nn.Module):
+    def __init__(self, linear, rank, alpha):
+        super().__init__()
+        self.linear = linear
+        self.rank = rank
+        self.alpha = alpha
+        self.scale = alpha / math.sqrt(rank)
+        in_features = linear.in_features
+        out_features = linear.out_features
+        self.A = nn.Parameter(torch.zeros(in_features, rank))
+        self.B = nn.Parameter(torch.zeros(out_features, rank))
+        # Initialize LoRA parameters
+        nn.init.normal_(self.A, mean=0, std=math.sqrt(self.rank) / self.linear.in_features)
+        nn.init.zeros_(self.B)
+        # Freeze original linear layer parameters
+        self.linear.weight.requires_grad = False
+        if self.linear.bias is not None:
+            self.linear.bias.requires_grad = False
+
+    def forward(self, x):
+        original_out = self.linear(x)
+        lora_out = (x @ self.A) @ self.B.T
+        return original_out + lora_out * self.scale
+
+
 # AdaLayerNormZero
 # return with modulated x for attn input, and params for later mlp modulation
 class AdaLayerNormZero(nn.Module):

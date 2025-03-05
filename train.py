@@ -52,6 +52,9 @@ def main(cfg: DictConfig):
             print(f"Missing keys: {missing_keys}")
         if unexpected_keys:
             print(f"Unexpected keys: {unexpected_keys}")
+    
+    if cfg.training.get('lora_training', False):
+        rf.transformer.apply_lora(cfg.training.lora_rank, cfg.training.lora_alpha)
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
     optimizer, lr_scheduler = get_optimizer(
@@ -63,6 +66,7 @@ def main(cfg: DictConfig):
         warmup_steps,
         max_steps=cfg.training.max_steps,
         min_lr=cfg.training.get('min_lr', 0.0),
+        lora_training=cfg.training.get('lora_training', False),
     )
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     cfg_dict['spk2idx'] = train_dataset.spk2idx
@@ -124,7 +128,6 @@ def main(cfg: DictConfig):
             train_dataset,
             batch_size=cfg.training.batch_size_per_gpu,
             num_workers=cfg.training.num_workers,
-            pin_memory=True,
             persistent_workers=True,
             shuffle=True,
             drop_last=True,
