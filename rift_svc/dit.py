@@ -215,3 +215,13 @@ class DiT(nn.Module):
                     delta = block.attn.v_proj.B @ block.attn.v_proj.A.T
                     block.attn.v_proj.linear.weight.add_(delta)
                 block.attn.v_proj = block.attn.v_proj.linear
+
+
+    def freeze_adaln_and_tembed(self):
+        for p in self.tembed.parameters():
+            p.requires_grad = False
+        for p in self.norm_out.parameters():
+            p.requires_grad = False
+        for block in self.transformer_blocks:
+            for p in block.attn_norm.parameters():
+                p.requires_grad = False

@@ -55,6 +55,9 @@ def main(cfg: DictConfig):
     
     if cfg.training.get('lora_training', False):
         rf.transformer.apply_lora(cfg.training.lora_rank, cfg.training.lora_alpha)
+    
+    if cfg.training.get('freeze_adaln_and_tembed', False):
+        rf.transformer.freeze_adaln_and_tembed()
 
     warmup_steps = int(cfg.training.max_steps * cfg.training.warmup_ratio)
     optimizer, lr_scheduler = get_optimizer(
