@@ -224,7 +224,7 @@ For 768-12 model, the VRAM consumption is ~3GB.
 
 ### V3
 #### Major Gains
-- Add LogNorm noise scheduler[6]
+- LogNorm noise scheduler[6]
 - Combine multiple classifier-free guidance with different conditions, motivated by [12] (spetial thanks to [@KakaruHayate](https://github.com/KakaruHayate) for sharing the work)
 
 #### Minor Gains
