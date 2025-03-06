@@ -26,9 +26,11 @@ training:
   test_per_steps: 1000
   log_media_per_steps: 1000
   wandb_project: "RIFT-SVC-FT"
-  wandb_run_name: "finetune_dit-512-8_steps${training.max_steps}-lr${training.learning_rate}" 
+  run_name: "finetune_dit-512-8_steps${training.max_steps}-lr${training.learning_rate}" 
   save_weights_only: true
   num_workers: 8
   eval_sample_steps: 32
   drop_spk_prob: 0.0
   time_schedule: "lognorm"
+  # Logger options
+  logger: "wandb"  # Options: "wandb" or "tensorboard"

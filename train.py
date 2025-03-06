@@ -4,7 +4,7 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from rift_svc import DiT, RF
@@ -81,7 +81,7 @@ def main(cfg: DictConfig):
     )
 
     checkpoint_callback = ModelCheckpoint(
-        dirpath=os.path.join('ckpts', cfg.training.wandb_run_name),
+        dirpath=os.path.join('ckpts', cfg.training.run_name),
         filename='model-{step}',
         save_top_k=-1,
         save_last='link',
@@ -89,18 +89,36 @@ def main(cfg: DictConfig):
         save_weights_only=cfg.training.save_weights_only,
     )
 
-    wandb_logger = WandbLogger(
-        project=cfg.training.wandb_project,
-        name=cfg.training.wandb_run_name,
-        id=cfg.training.get('wandb_resume_id', None),
-        resume='allow',
-    )
-    if wandb_logger.experiment.config:
-        # Merge with existing config, giving priority to existing values
-        wandb_logger.experiment.config.update(cfg_dict, allow_val_change=True)
+    # Logger selection based on config
+    logger_type = cfg.training.get('logger', 'wandb').lower()
+    run_name = cfg.training.run_name
+    # Update checkpoint directory to use run_name
+    checkpoint_callback.dirpath = os.path.join('ckpts', run_name)
+    
+    if logger_type == 'wandb':
+        # Use Weights & Biases logger
+        logger = WandbLogger(
+            project=cfg.training.wandb_project,
+            name=run_name,
+            id=cfg.training.get('wandb_resume_id', None),
+            resume='allow',
+        )
+        if logger.experiment.config:
+            # Merge with existing config, giving priority to existing values
+            logger.experiment.config.update(cfg_dict, allow_val_change=True)
+        else:
+            # If no existing config, set it directly
+            logger.experiment.config.update(cfg_dict)
+    elif logger_type == 'tensorboard':
+        # Use TensorBoard logger
+        tensorboard_log_dir = os.path.join('logs', run_name)
+        logger = TensorBoardLogger(
+            save_dir=tensorboard_log_dir,
+            name=None,  # Use the directory as is without adding another subfolder
+            version='',  # Don't add version subdirectory
+        )
     else:
-        # If no existing config, set it directly
-        wandb_logger.experiment.config.update(cfg_dict)
+        raise ValueError(f"Invalid logger type: {logger_type}")
 
     callbacks = [checkpoint_callback, CustomProgressBar()]
     if lr_scheduler is not None:
@@ -114,7 +132,7 @@ def main(cfg: DictConfig):
         precision='bf16-mixed',
         accumulate_grad_batches=cfg.training.grad_accumulation_steps,
         callbacks=callbacks,
-        logger=wandb_logger,
+        logger=logger,
         val_check_interval=cfg.training.test_per_steps,
         check_val_every_n_epoch=None,
         gradient_clip_val=cfg.training.max_grad_norm,
