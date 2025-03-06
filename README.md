@@ -39,14 +39,16 @@ pip install -r requirements.txt
 
 #### 5. Download pretrained models for feature extraction and vocoder.
 ```bash
-python pretrained/download.py
+python pretrained/download.py   
 ```
 
 #### 6. Download pretrained weights for fine-tuning.
 
 | Model | Command |
 | --- | --- |
+| pretrain-v3_dit-512-8 | wget https://huggingface.co/Pur1zumu/RIFT-SVC-pretrained/resolve/main/pretrain-v3_dit-512-8.ckpt -O pretrained/pretrain-v3_dit-512-8.ckpt |
 | pretrain-v3_dit-768-12 | wget https://huggingface.co/Pur1zumu/RIFT-SVC-pretrained/resolve/main/pretrain-v3_dit-768-12.ckpt -O pretrained/pretrain-v3_dit-768-12.ckpt |
+| pretrain-v3_dit-1024-16 | wget https://huggingface.co/Pur1zumu/RIFT-SVC-pretrained/resolve/main/pretrain-v3_dit-1024-16.ckpt -O pretrained/pretrain-v3_dit-1024-16.ckpt |
 
 
 #### 7. Prepare data and extract features.
@@ -151,10 +153,16 @@ The below table shows the VRAM consumption of different models, all tested on on
 
 | Model | Batch Size | VRAM Consumption |
 | --- | --- | --- |
+| v3_dit-512-8 | 64 | ~8GB |
+| v3_dit-512-8 | 32 | ~5GB |
+| v3_dit-512-8 | 16 | ~3GB |
 | v3_dit-768-12 | 64 | ~17GB |
 | v3_dit-768-12 | 32 | ~10GB |
 | v3_dit-768-12 | 16 | ~6.5GB |
 | v3_dit-768-12 | 8 | ~5GB |
+| v3_dit-1024-16 | 32 | ~17GB |
+| v3_dit-1024-16 | 16 | ~11GB |
+| v3_dit-1024-16 | 8 | ~8.5GB |
 
 Again, you should adjust the learning rate accordingly.
 For batch size <=8, you may consider using gradient accumulation by adding `--training.grad_accumulation_steps=n`, where `n` is the number of gradient accumulation steps.
