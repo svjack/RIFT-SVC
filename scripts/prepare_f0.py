@@ -1,23 +1,3 @@
-#!/usr/bin/env python3
-"""
-prepare_f0.py
-
-该脚本从meta_info.json中读取音频信息，对每个音频提取f0，
-并保存为 .f0.pt 文件。
-
-Usage:
-    python prepare_f0.py --data-dir DATA_DIR --model-path MODEL_PATH [OPTIONS]
-
-Options:
-    --data-dir DIRECTORY            预处理数据集根目录 (必选)。
-    --model-path FILE_PATH          预训练RMVPE模型路径 (必选)。
-    --hop-length INTEGER            f0提取的hop length (默认: 256)。
-    --sample-rate INTEGER           音频采样率 (默认: 22050)。
-    --num-workers INTEGER           并行进程数 (默认: 2)。
-    --overwrite                     是否覆盖已存在的f0文件。
-    --verbose                       是否打印详细日志。
-"""
-
 import json
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,7 +16,7 @@ RMVPE_HOP_LENGTH = 160
 
 def get_f0_model(model_path):
     """
-    懒加载RMVPE模型，每个进程首次调用时加载并缓存。
+    Lazy-load the RMVPE model, loading and caching it on its first invocation within each process.
     """
     if not hasattr(get_f0_model, "model"):
         device = get_device()
@@ -47,7 +27,7 @@ def get_f0_model(model_path):
 
 def process_f0(audio, data_dir, model_path, hop_length, sample_rate, overwrite, verbose):
     """
-    对单个音频提取f0，并保存为 .f0.pt 文件。
+    Extract the f0 for a single audio file and save it as a .f0.pt file.
     """
     speaker = audio.get('speaker')
     file_name = audio.get('file_name')
@@ -109,51 +89,51 @@ def process_f0(audio, data_dir, model_path, hop_length, sample_rate, overwrite, 
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
-    help='预处理数据集的根目录。'
+    help='Preprocessed dataset root directory.'
 )
 @click.option(
     '--model-path',
     type=click.Path(exists=True, file_okay=True, readable=True),
     required=False,
     default="pretrained/rmvpe/model.pt",
-    help='预训练RMVPE模型路径。'
+    help='Pre-trained RMVPE model path.'
 )
 @click.option(
     '--hop-length',
     type=int,
     default=512,
     show_default=True,
-    help='f0提取的hop length。'
+    help='Hop length for f0 extraction.'
 )
 @click.option(
     '--sample-rate',
     type=int,
     default=44100,
     show_default=True,
-    help='音频采样率（Hz）。'
+    help='Audio sample rate (Hz).'
 )
 @click.option(
     '--num-workers',
     type=int,
     default=2,
     show_default=True,
-    help='并行进程数。'
+    help='Number of parallel processes.'
 )
 @click.option(
     '--overwrite',
     is_flag=True,
     default=False,
-    help='是否覆盖已存在的f0文件。'
+    help='Whether to overwrite existing f0 files.'
 )
 @click.option(
     '--verbose',
     is_flag=True,
     default=False,
-    help='是否打印详细日志。'
+    help='Whether to display detailed logs.'
 )
 def prepare_f0(data_dir, model_path, hop_length, sample_rate, num_workers, overwrite, verbose):
     """
-    对meta_info.json中的音频提取f0，并保存为 .f0.pt 文件。
+    Extract the f0 for all audio files listed in meta_info.json and save them as .f0.pt files.
     """
     meta_info_path = Path(data_dir) / "meta_info.json"
     try:

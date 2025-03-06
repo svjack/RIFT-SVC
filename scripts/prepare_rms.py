@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-"""
-generate_rms.py
-
-该脚本从meta_info.json中读取音频信息，对每个音频提取RMS energy，
-并保存为 .rms.pt 文件。
-
-Usage:
-    python generate_rms.py --data-dir DATA_DIR [OPTIONS]
-"""
-
 import json
 import sys, os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -24,7 +13,7 @@ from rift_svc.feature_extractors import RMSExtractor
 
 def get_rms_extractor(hop_length):
     """
-    懒加载RMSExtractor，每个进程首次调用时加载并缓存。
+    Lazy-load the RMSExtractor and cache it upon the first call in each process.
     """
     if not hasattr(get_rms_extractor, "extractor"):
         
@@ -37,7 +26,7 @@ def get_rms_extractor(hop_length):
 
 def process_rms(audio, data_dir, hop_length, verbose):
     """
-    对单个音频提取RMS energy，并保存为 .rms.pt 文件。
+    Extract RMS energy for a single audio file and save it as a .rms.pt file.
     """
     speaker = audio.get('speaker')
     file_name = audio.get('file_name')
@@ -70,7 +59,7 @@ def process_rms(audio, data_dir, hop_length, verbose):
         elif waveform.dim() == 2 and waveform.shape[0] != 1:
             waveform = waveform.mean(dim=0, keepdim=True)
 
-        rms = extractor(waveform)  # 输出形状: (1, frames)
+        rms = extractor(waveform)  # Output shape: (1, frames)
         rms = rms.cpu()
         torch.save(rms, rms_path)
         if verbose:
@@ -83,31 +72,31 @@ def process_rms(audio, data_dir, hop_length, verbose):
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
-    help='预处理数据集的根目录。'
+    help='The root directory of the dataset to preprocess.'
 )
 @click.option(
     '--hop-length',
     type=int,
     default=512,
     show_default=True,
-    help='RMS提取的hop length。'
+    help='Hop length for RMS extraction.'
 )
 @click.option(
     '--num-workers',
     type=int,
     default=4,
     show_default=True,
-    help='并行进程数。'
+    help='Number of parallel processes.'
 )
 @click.option(
     '--verbose',
     is_flag=True,
     default=False,
-    help='是否打印详细日志。'
+    help='Whether to print detailed logs.'
 )
 def generate_rms(data_dir, hop_length, num_workers, verbose):
     """
-    对meta_info.json中的音频提取RMS energy，并保存为 .rms.pt 文件。
+    Extract RMS energy for audios listed in meta_info.json and save them as .rms.pt files.
     """
     meta_info = Path(data_dir) / "meta_info.json"
     try:

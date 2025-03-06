@@ -1,21 +1,3 @@
-#!/usr/bin/env python3
-"""
-prepare_cvec.py
-
-该脚本从meta_info.json中读取音频信息，对每个音频提取content vector，
-并保存为 .cvec.pt 文件。
-
-Usage:
-    python prepare_cvec.py --data-dir DATA_DIR --model-path MODEL_PATH [OPTIONS]
-
-Options:
-    --data-dir DIRECTORY            预处理数据集根目录 (必选)。
-    --model-path FILE_PATH          预训练HuBERT-like模型路径 (必选)。
-    --num-workers INTEGER           并行进程数 (默认: 2)。
-    --overwrite                     是否覆盖已存在的content vectors。
-    --verbose                       是否打印详细日志。
-"""
-
 import json
 import sys
 import os
@@ -43,7 +25,7 @@ CVEC_SAMPLE_RATE = 16000
 
 def get_cvec_model(model_path):
     """
-    懒加载HuBERT模型，每个进程首次调用时加载并缓存。
+    Lazy-load the HuBERT model, loading and caching it on its first invocation in each process.
     """
     if not hasattr(get_cvec_model, "model"):
         device = get_device()
@@ -56,7 +38,7 @@ def get_cvec_model(model_path):
 
 def process_cvec(audio, data_dir, model_path, overwrite, verbose):
     """
-    对单个音频提取content vector并保存为 .cvec.pt 文件。
+    Extract the content vector for a single audio file and save it as a .cvec.pt file.
     """
     speaker = audio.get('speaker')
     file_name = audio.get('file_name')
@@ -92,10 +74,10 @@ def process_cvec(audio, data_dir, model_path, overwrite, verbose):
             waveform = torchaudio.functional.resample(waveform, sr, CVEC_SAMPLE_RATE)
 
         with torch.no_grad():
-            output = model(waveform)  # 返回字典，包含 "last_hidden_state"
+            output = model(waveform)  # returns a dictionary containing "last_hidden_state"
             cvec = output["last_hidden_state"].squeeze(0).cpu()
 
-            # 处理移位后的情况
+            # Process the shifted waveform
             waveform_shifted = roll_pad(waveform, -160)
             output_shifted = model(waveform_shifted)
             cvec_shifted = output_shifted["last_hidden_state"].squeeze(0).cpu()
@@ -114,37 +96,37 @@ def process_cvec(audio, data_dir, model_path, overwrite, verbose):
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
-    help='预处理数据集的根目录。'
+    help='Root directory of the preprocessed dataset.'
 )
 @click.option(
     '--model-path',
     type=click.Path(exists=True, file_okay=True, readable=True),
     required=False,
     default="pretrained/content-vec-best",
-    help='预训练HuBERT-like模型路径。'
+    help='Path to the pre-trained HuBERT-like model.'
 )
 @click.option(
     '--num-workers',
     type=int,
     default=2,
     show_default=True,
-    help='并行进程数。'
+    help='Number of parallel processes.'
 )
 @click.option(
     '--overwrite',
     is_flag=True,
     default=False,
-    help='是否覆盖已存在的content vectors。'
+    help='Whether to overwrite existing content vectors.'
 )
 @click.option(
     '--verbose',
     is_flag=True,
     default=False,
-    help='是否打印详细日志。'
+    help='Whether to display detailed logs.'
 )
 def prepare_contentvec(data_dir, model_path, num_workers, overwrite, verbose):
     """
-    对meta_info.json中的音频提取content vectors，并保存为 .cvec.pt 文件。
+    Extract content vectors from the audio files listed in meta_info.json and save them as .cvec.pt files.
     """
     meta_info_path = Path(data_dir) / "meta_info.json"
     try:
@@ -162,7 +144,7 @@ def prepare_contentvec(data_dir, model_path, num_workers, overwrite, verbose):
         click.echo("No audio files found in meta_info.json.")
         sys.exit(1)
     
-    # 将 model_path 作为参数传入处理函数
+    # Pass model_path as a parameter to the processing function
     process_func = partial(
         process_cvec,
         data_dir=data_dir,

@@ -1,20 +1,3 @@
-#!/usr/bin/env python3
-"""
-generate_mel_specs.py
-
-该脚本从meta_info.json中读取音频信息，对每个音频生成Mel spectrogram，
-并以 .mel.pt 格式保存在相应目录下。
-
-Usage:
-    python prepare_mel.py --data-dir DATA_DIR [OPTIONS]
-
-Options:
-    --data-dir DIRECTORY         Path to the root of the preprocessed dataset directory. (Required)
-    --hop-length INTEGER         Hop length for Mel spectrogram. (Default: 256)
-    --n-mel-channels INTEGER     Number of Mel channels. (Default: 128)
-    --sample-rate INTEGER        Target sample rate in Hz. (Default: 22050)
-    --verbose                    Enable verbose output.
-"""
 import os
 import json
 import sys
@@ -30,11 +13,12 @@ from multiprocessing_utils import run_parallel, get_device
 
 def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verbose, overwrite, device):
     """
-    处理单个音频：读取WAV文件，生成Mel spectrogram，并保存为 .mel.pt 文件。
+    Process a single audio file: read the WAV file, generate its Mel spectrogram,
+    and save it as a .mel.pt file.
     """
     speaker = audio.get('speaker')
     file_name = audio.get('file_name')
-    # 如果信息不全则跳过
+    # Skip if information is incomplete
     if not speaker or not file_name:
         if verbose:
             click.echo(f"Skipping invalid entry: {audio}", err=True)
@@ -55,7 +39,7 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
 
     try:
         waveform, sr = torchaudio.load(str(wav_path))
-        # 确保形状正确
+        # Ensure the correct shape
         if len(waveform.shape) == 1:
             waveform = waveform.unsqueeze(0)
         elif len(waveform.shape) == 2 and waveform.shape[0] != 1:
@@ -73,7 +57,7 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
             fmin=40,
             fmax=16000,
         )
-        mel = mel.cpu()  # 转回CPU保存
+        mel = mel.cpu()  # Move back to CPU for saving
 
         torch.save(mel, mel_path)
 
@@ -88,51 +72,52 @@ def process_audio(audio, data_dir, hop_length, n_mel_channels, sample_rate, verb
     '--data-dir',
     type=click.Path(exists=True, file_okay=False, readable=True),
     required=True,
-    help='预处理数据集的根目录。'
+    help='Root directory of the preprocessed dataset.'
 )
 @click.option(
     '--hop-length',
     type=int,
     default=512,
     show_default=True,
-    help='Mel spectrogram的hop length。'
+    help='Hop length for the Mel spectrogram.'
 )
 @click.option(
     '--n-mel-channels',
     type=int,
     default=128,
     show_default=True,
-    help='Mel通道数。'
+    help='Number of Mel channels.'
 )
 @click.option(
     '--sample-rate',
     type=int,
     default=44100,
     show_default=True,
-    help='目标采样率（Hz）。'
+    help='Target sample rate (Hz).'
 )
 @click.option(
     '--num-workers',
     type=int,
     default=4,
     show_default=True,
-    help='并行进程数。'
+    help='Number of parallel processes.'
 )
 @click.option(
     '--overwrite',
     is_flag=True,
     default=False,
-    help='是否覆盖已存在的Mel spectrogram。'
+    help='Whether to overwrite existing Mel spectrogram files.'
 )
 @click.option(
     '--verbose',
     is_flag=True,
     default=False,
-    help='是否打印详细日志。'
+    help='Whether to print detailed logs.'
 )
 def generate_mel_specs(data_dir, hop_length, n_mel_channels, sample_rate, num_workers, verbose, overwrite):
     """
-    对meta_info.json中的音频生成Mel spectrogram，并保存为 .mel.pt 文件。
+    Generate Mel spectrograms for the audio files listed in meta_info.json and
+    save them as .mel.pt files.
     """
     meta_info = Path(data_dir) / "meta_info.json"
     try:
