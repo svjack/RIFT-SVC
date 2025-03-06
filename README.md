@@ -111,7 +111,7 @@ For finetuning 768-12 model, run the following command:
 python train.py \
 --config-name finetune \
 model=dit-768-12 \
-training.wandb_run_name=finetune_ckpt-v3_dit-768-12_30000steps-lr0.00005 \
+training.run_name=finetune_v3-dit-768-12_30000steps-lr0.00005 \
 +training.pretrained_path=pretrained/pretrain-v3_dit-768-12.ckpt \
 training.learning_rate=5e-5 \
 training.weight_decay=0.01 \
@@ -128,7 +128,7 @@ training.logger=wandb or tensorboard
 **Arguments:**
 - `--config-name finetune`: The name of the config file in `config/finetune.yaml`.
 - `--model`: The model architecture to use for fine-tuning. See `config/model/` for more details. The model should align with the pretrained model.
-- `--training.wandb_run_name`: The name of the wandb run.
+- `--training.run_name`: The name of the run.
 - `--training.pretrained_path`: The path to the pretrained model.
 - `--training.learning_rate`: The learning rate for fine-tuning.
 - `--training.max_steps`: The maximum number of steps for fine-tuning.
@@ -225,7 +225,7 @@ For 768-12 model, the VRAM consumption is ~3GB.
 ### V3
 #### Major Gains
 - Add LogNorm noise scheduler[6]
-- Combine multiple classifier-free guidance with different conditions, motivated by [12]
+- Combine multiple classifier-free guidance with different conditions, motivated by [12] (spetial thanks to [@KakaruHayate](https://github.com/KakaruHayate) for sharing the work)
 
 #### Minor Gains
 - DWConv's kernel size tuning
