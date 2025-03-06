@@ -341,7 +341,7 @@ def process_segment(
 @click.option('--cfg-rescale', type=float, default=0.7, help='Classifier-free guidance rescale factor')
 @click.option('--cvec-downsample-rate', type=int, default=2, help='Downsampling rate for bad_cvec creation')
 @click.option('--target-loudness', type=float, default=-18.0, help='Target loudness in LUFS for normalization')
-@click.option('--restore-loudness', is_flag=True, default=True, help='Restore loudness to original')
+@click.option('--restore-loudness', default=True, help='Restore loudness to original')
 @click.option('--fade-duration', type=float, default=20.0, help='Fade duration in milliseconds')
 @click.option('--sliced-inference', is_flag=True, default=False, help='Use sliced inference for processing long segments')
 def main(

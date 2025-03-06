@@ -9,12 +9,13 @@ numpy
 omegaconf
 Pillow
 pyloudnorm
-pytorch_lightning
 PyYAML
+pytorch_lightning
 resampy
 schedulefree
 scipy
 soundfile
+tensorboard
 thop
 torchdiffeq
 tqdm
