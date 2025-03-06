@@ -57,7 +57,7 @@ def get_optimizer(
         lr_scheduler = LinearWarmupDecayLR(optimizer, warmup_steps, max_steps, min_lr=min_lr)
         return optimizer, lr_scheduler
     else:
-        raise NotImplementedError(f"Optimizer type {optimizer_type} not implemented")
+        raise ValueError(f"Invalid optimizer type: {optimizer_type}")
 
 
 class LinearWarmupDecayLR(_LRScheduler):
