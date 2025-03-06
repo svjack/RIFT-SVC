@@ -1,6 +1,7 @@
 import io
 import os
 import random
+import time
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -9,6 +10,7 @@ import torch
 import torch.nn.functional as F
 from jaxtyping import Bool, Int
 from PIL import Image
+from pytorch_lightning.callbacks import TQDMProgressBar
 
 
 def seed_everything(seed: int = 0):
@@ -87,7 +89,7 @@ def l2_grad_norm(model: torch.nn.Module):
     return torch.cat([p.grad.data.flatten() for p in model.parameters() if p.grad is not None]).norm(2)
 
 
-def interpolate_tensor(tensor, new_size):
+def nearest_interpolate_tensor(tensor, new_size):
     # Add two dummy dimensions to make it [1, 1, n, d]
     tensor = tensor.unsqueeze(0).unsqueeze(0)
     
@@ -98,6 +100,19 @@ def interpolate_tensor(tensor, new_size):
     interpolated = interpolated.squeeze(0).squeeze(0)
     
     return interpolated
+
+
+def linear_interpolate_tensor(tensor, new_size):
+    # Assumes input tensor shape is [n, d]
+    # Rearrange tensor to shape [1, d, n] to prepare for linear interpolation
+    tensor = tensor.transpose(0, 1).unsqueeze(0)
+    
+    # Interpolate along the length dimension (last dimension) using linear interpolation.
+    # align_corners=True preserves the boundary values; adjust this flag if needed.
+    interpolated = F.interpolate(tensor, size=new_size, mode='linear', align_corners=True)
+    
+    # Restore the tensor to shape [new_size, d]
+    return interpolated.squeeze(0).transpose(0, 1)
 
 
 # f0 helpers
@@ -144,3 +159,58 @@ def post_process_f0(f0, sample_rate, hop_length, n_frames, silence_front=0.0, cu
         return f0[:-1]
     else:
         return f0
+
+# progress bar helper
+
+class CustomProgressBar(TQDMProgressBar):
+    def __init__(self):
+        super().__init__()
+        self.start_time = None
+        self.step_start_time = None
+        self.total_steps = None
+
+    def on_train_start(self, trainer, pl_module):
+        super().on_train_start(trainer, pl_module)
+        self.start_time = time.time()
+        self.total_steps = trainer.max_steps
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
+        
+        current_step = trainer.global_step
+        total_steps = self.total_steps
+
+        # Calculate elapsed time since training started
+        elapsed_time = time.time() - self.start_time
+        
+        # Estimate average step time and remaining time
+        average_step_time = elapsed_time / current_step if current_step > 0 else 0
+        remaining_steps = total_steps - current_step
+        remaining_time = average_step_time * remaining_steps if total_steps > 0 else 0
+
+        # Format times with no leading zeros for hours
+        def format_time(seconds):
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            seconds = int(seconds % 60)
+            return f"{hours}:{minutes:02d}:{seconds:02d}"
+
+        elapsed_time_str = format_time(elapsed_time)
+        remaining_time_str = format_time(remaining_time)
+
+        # Update the progress bar with loss, elapsed time, remaining time, and remaining steps
+        self.train_progress_bar.set_postfix({
+            "loss": f"{outputs['loss'].item():.4f}",
+            "elapsed_time": elapsed_time_str + "/" + remaining_time_str,
+            "remaining_steps": str(remaining_steps) + "/" + str(total_steps)
+        })
+
+
+# state dict helpers
+
+def load_state_dict(model, state_dict, strict=False):
+    """Load state dict while handling 'model.' prefix"""
+    if any(k.startswith('model.') for k in state_dict.keys()):
+        # Remove 'model.' prefix
+        state_dict = {k.replace('model.', ''): v for k, v in state_dict.items()}
+    return model.load_state_dict(state_dict, strict=strict)

@@ -1,12 +1,12 @@
 """
-generate_meta_info.py
+prepare_data_meta.py
 
 This script scans a preprocessed audio dataset, gathers meta-information about speakers and their audio files,
 and splits the data into training and testing sets based on specified options. The resulting meta-information
 is saved in a JSON file.
 
 Usage:
-    python generate_meta_info.py --data-dir PATH_TO_DATASET [OPTIONS]
+    python prepare_data_meta.py --data-dir PATH_TO_DATASET [OPTIONS]
 
 Options:
     --data-dir                 Path to the preprocessed dataset directory. (Required)
@@ -97,6 +97,10 @@ def perform_stratified_split(speaker_to_files, num_test_per_speaker, seed, only_
         "gtsinger-IT",
         "gtsinger-KO",
         "gtsinger-RU"
+    ] + [
+        "Tenor",
+        "Bass",
+        "ManRaw"
     ]
 
     if only_include_speakers:
