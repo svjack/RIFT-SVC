@@ -227,9 +227,9 @@ python infer.py \
 
 If you experience sudden audio gaps during playback or abnormal pitch jumps in the output, try using the --robust-f0 argument:
 
-`--robust-f0 0` Default setting - no filtering, uses raw output from the rmvpe f0 extractor
-`--robust-f0 1` Light filtering - helps smooth minor distortions
-`--robust-f0 2` Aggressive filtering - provides maximum smoothing but may reduce expressiveness
+- `--robust-f0 0` Default setting - no filtering, uses raw output from the rmvpe f0 extractor
+- `--robust-f0 1` Light filtering - helps smooth minor distortions
+- `--robust-f0 2` Aggressive filtering - provides maximum smoothing but may reduce expressiveness
 
 ##### VRAM Consumption
 
