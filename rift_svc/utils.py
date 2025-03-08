@@ -11,6 +11,9 @@ import torch.nn.functional as F
 from jaxtyping import Bool, Int
 from PIL import Image
 from pytorch_lightning.callbacks import TQDMProgressBar
+import parselmouth as pm
+import librosa
+import pyworld as pw
 
 
 def seed_everything(seed: int = 0):
@@ -159,6 +162,91 @@ def post_process_f0(f0, sample_rate, hop_length, n_frames, silence_front=0.0, cu
         return f0[:-1]
     else:
         return f0
+    
+# pyworld
+def get_f0_pw(audio, sr, time_step, f0_min, f0_max):
+    pw_pre_f0, times = pw.dio(
+        audio.astype(np.double), sr,
+        f0_floor=f0_min, f0_ceil=f0_max,
+        frame_period=time_step*1000)    # raw pitch extractor
+    pw_post_f0 = pw.stonemask(audio.astype(np.double), pw_pre_f0, times, sr)  # pitch refinement
+    pw_post_f0[pw_post_f0==0] = np.nan
+    pw_post_f0 = slide_nanmedian(pw_post_f0, 3)
+    return pw_post_f0
+
+# parselmouth
+def get_f0_pm(audio, sr, time_step, f0_min, f0_max):
+    pmac_pitch = pm.Sound(audio, sampling_frequency=sr).to_pitch_ac(
+        time_step=time_step, voicing_threshold=0.6,
+        pitch_floor=f0_min, pitch_ceiling=f0_max,
+        very_accurate=True, octave_jump_cost=0.5)
+    pmac_f0 = pmac_pitch.selected_array['frequency']
+    pmac_f0[pmac_f0==0] = np.nan
+    pmac_f0 = slide_nanmedian(pmac_f0, 3)
+    return pmac_f0
+
+from numba import njit
+@njit
+def slide_nanmedian(signals=np.array([]), win_length=3):
+    """Filters a sequence, ignoring nan values
+
+    Arguments
+        signals (numpy.ndarray (shape=(time)))
+            The signals to filter
+        win_length
+            The size of the analysis window
+
+    Returns
+        filtered (numpy.ndarray (shape=(time)))
+    """
+    # Output buffer
+    filtered = np.empty_like(signals)
+
+    # Loop over frames
+    for i in range(signals.shape[0]):
+
+        # Get analysis window bounds
+        start = max(0, i - win_length // 2)
+        end = min(signals.shape[0], i + win_length // 2 + 1)
+
+        # Apply filter to window
+        filtered[i] = np.nanmedian(signals[start:end])
+
+    return filtered
+
+
+def f0_ensemble(rmvpe_f0, pw_f0, pmac_f0):
+    trunc_len = len(rmvpe_f0)
+    pw_f0 = pw_f0[:trunc_len]
+    # pad pmac_f0
+    pmac_f0 = np.concatenate(
+        [pmac_f0, np.full(len(pw_f0)-len(pmac_f0), np.nan, dtype=pmac_f0.dtype)])
+
+    stack_f0 = np.stack([pw_f0, pmac_f0, rmvpe_f0], axis=0)
+
+    meadian_f0 = np.nanmedian(stack_f0, axis=0)
+    nan_nums = np.sum(np.isnan(stack_f0), axis=0)
+    meadian_f0[nan_nums>=2] = np.nan
+
+    slide_meadian_f0 = slide_nanmedian(meadian_f0, 41)
+
+    f0_dev = np.abs(meadian_f0-slide_meadian_f0)
+    meadian_f0[f0_dev>96] = slide_meadian_f0[f0_dev>96]
+
+    nan1_f0_min = np.nanmin(stack_f0[:, nan_nums==1], axis=0)
+    nan1_f0_max = np.nanmax(stack_f0[:, nan_nums==1], axis=0)
+
+    nan1_f0 = np.where(
+        np.abs(nan1_f0_min-slide_meadian_f0[nan_nums==1])<np.abs(nan1_f0_max-slide_meadian_f0[nan_nums==1]),
+        nan1_f0_min, nan1_f0_max)
+    meadian_f0[nan_nums==1] = nan1_f0
+
+    meadian_f0 = slide_nanmedian(meadian_f0, 3)
+    meadian_f0[nan_nums>=2] = np.nan
+    meadian_f0[np.isnan(meadian_f0)] = 0
+
+    return meadian_f0
+
 
 # progress bar helper
 

@@ -11,7 +11,7 @@ from rift_svc import DiT, RF
 from rift_svc.feature_extractors import HubertModelWithFinalProj, RMSExtractor, get_mel_spectrogram
 from rift_svc.nsf_hifigan import NsfHifiGAN
 from rift_svc.rmvpe import RMVPE
-from rift_svc.utils import linear_interpolate_tensor, post_process_f0
+from rift_svc.utils import linear_interpolate_tensor, post_process_f0, f0_ensemble, get_f0_pw, get_f0_pm
 from slicer import Slicer
 
 
@@ -79,7 +79,8 @@ def apply_fade(audio, fade_samples, fade_in=True):
 
 
 def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_extractor, 
-                     device, key_shift=0, ds_cfg_strength=0.0, cvec_downsample_rate=2, target_loudness=-18.0):
+                     device, key_shift=0, ds_cfg_strength=0.0, cvec_downsample_rate=2, target_loudness=-18.0,
+                     robust_f0=False):
     """Extract all required features from an audio segment"""
     # Normalize input segment
     meter = pyln.Meter(sample_rate, block_size=0.1)
@@ -121,8 +122,24 @@ def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_
         cvec_ds = None
 
     # Extract f0
-    f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
-    f0 = post_process_f0(f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
+    if robust_f0:
+        # Parameters for F0 extraction
+        time_step = hop_length / sample_rate
+        f0_min = 40
+        f0_max = 1100
+        
+        # Extract F0 using multiple methods
+        rmvpe_f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
+        rmvpe_f0 = post_process_f0(rmvpe_f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
+        pw_f0 = get_f0_pw(normalized_audio, sample_rate, time_step, f0_min, f0_max)
+        pmac_f0 = get_f0_pm(normalized_audio, sample_rate, time_step, f0_min, f0_max)
+        # Combine using ensemble method
+        f0 = f0_ensemble(rmvpe_f0, pw_f0, pmac_f0)
+    else:
+        # Use only RMVPE for F0 extraction (original method)
+        f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
+        f0 = post_process_f0(f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
+    
     if key_shift != 0:
         f0 = f0 * 2 ** (key_shift / 12)
     f0 = torch.from_numpy(f0).float().to(device)[None, :]
@@ -296,13 +313,15 @@ def process_segment(
     cvec_downsample_rate=2,
     target_loudness=-18.0,
     restore_loudness=True,
-    sliced_inference=False
+    sliced_inference=False,
+    robust_f0=False
 ):
     """Process a single audio segment with consistent handling"""
     # Extract features
     mel, cvec, cvec_ds, f0, rms, original_loudness = extract_features(
         audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_extractor, 
-        device, key_shift, ds_cfg_strength, cvec_downsample_rate, target_loudness
+        device, key_shift, ds_cfg_strength, cvec_downsample_rate, target_loudness,
+        robust_f0
     )
     
     # Prepare speaker ID
@@ -344,6 +363,7 @@ def process_segment(
 @click.option('--restore-loudness', default=True, help='Restore loudness to original')
 @click.option('--fade-duration', type=float, default=20.0, help='Fade duration in milliseconds')
 @click.option('--sliced-inference', is_flag=True, default=False, help='Use sliced inference for processing long segments')
+@click.option('--robust-f0', is_flag=True, default=False, help='Use robust f0 estimation')
 def main(
     model,
     input,
@@ -361,7 +381,8 @@ def main(
     target_loudness,
     restore_loudness,
     fade_duration,
-    sliced_inference
+    sliced_inference,
+    robust_f0
 ):
     """Convert the voice in an audio file to a target speaker."""
 
@@ -413,13 +434,15 @@ def main(
 
     with torch.no_grad():
         for idx, (start_sample, chunk) in enumerate(tqdm(segments_with_pos)):
+
             # Process the segment
             audio_out = process_segment(
                 chunk, svc_model, vocoder, rmvpe, hubert, rms_extractor,
                 speaker_id, sample_rate, hop_length, device,
                 key_shift, infer_steps, ds_cfg_strength, spk_cfg_strength,
                 skip_cfg_strength, cfg_skip_layers, cfg_rescale,
-                cvec_downsample_rate, target_loudness, restore_loudness, sliced_inference
+                cvec_downsample_rate, target_loudness, restore_loudness, sliced_inference,
+                robust_f0
             )
             
             # Ensure consistent length
