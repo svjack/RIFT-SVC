@@ -248,6 +248,66 @@ def f0_ensemble(rmvpe_f0, pw_f0, pmac_f0):
     return meadian_f0
 
 
+def f0_ensemble_light(rmvpe_f0, pw_f0, pmac_f0, rms=None, rms_threshold=0.05):
+    """
+    A lighter version of f0 ensemble that preserves RMVPE's expressiveness.
+    Only applies corrections when RMVPE shows abnormalities.
+    
+    Args:
+        rmvpe_f0 (numpy.ndarray): F0 from RMVPE
+        pw_f0 (numpy.ndarray): F0 from WORLD
+        pmac_f0 (numpy.ndarray): F0 from Parselmouth
+        rms (numpy.ndarray, optional): RMS energy values, used to detect voiced segments
+        rms_threshold (float, optional): Threshold for RMS to consider a segment as voiced
+        
+    Returns:
+        numpy.ndarray: Corrected F0 values
+    """
+    trunc_len = len(rmvpe_f0)
+    pw_f0 = pw_f0[:trunc_len]
+    
+    # Pad pmac_f0 if needed
+    pmac_f0 = np.concatenate(
+        [pmac_f0, np.full(max(0, len(pw_f0)-len(pmac_f0)), np.nan, dtype=pmac_f0.dtype)])
+    
+    # Create a copy of rmvpe_f0 to preserve most of its values
+    corrected_f0 = rmvpe_f0.copy()
+    
+    # Stack all F0 values
+    stack_f0 = np.stack([pw_f0, pmac_f0, rmvpe_f0], axis=0)
+    
+    # Count non-NaN values for each frame
+    valid_count = np.sum(~np.isnan(stack_f0), axis=0)
+    
+    # Identify frames where RMVPE shows zero but other methods detect pitch
+    zero_rmvpe_mask = (rmvpe_f0 == 0)
+     
+    # For frames where RMVPE is zero but at least one other method has a valid F0
+    # and there's voice activity (if RMS is provided)
+    other_methods_valid = ((~np.isnan(pw_f0) & (pw_f0 > 0)) | 
+                           (~np.isnan(pmac_f0) & (pmac_f0 > 0)))
+    
+    correction_mask = zero_rmvpe_mask & other_methods_valid
+    
+    # If RMS is provided, only correct frames with voice activity
+    if rms is not None:
+        voice_activity = rms > rms_threshold
+        correction_mask = correction_mask & voice_activity
+    
+    # For frames needing correction, use median of available values
+    if np.any(correction_mask):
+        # For each frame needing correction, calculate median of non-NaN values
+        for i in np.where(correction_mask)[0]:
+            valid_values = stack_f0[:, i][~np.isnan(stack_f0[:, i]) & (stack_f0[:, i] > 0)]
+            if len(valid_values) > 0:
+                corrected_f0[i] = np.median(valid_values)
+    
+    # Handle any remaining NaN values
+    corrected_f0[np.isnan(corrected_f0)] = 0
+    
+    return corrected_f0
+
+
 # progress bar helper
 
 class CustomProgressBar(TQDMProgressBar):

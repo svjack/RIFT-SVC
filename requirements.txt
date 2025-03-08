@@ -1,5 +1,6 @@
 click
 einops
+gradio
 huggingface_hub
 hydra-core
 jaxtyping
@@ -8,6 +9,7 @@ matplotlib
 numpy
 omegaconf
 Pillow
+praat-parselmouth
 pyloudnorm
 PyYAML
 pytorch_lightning

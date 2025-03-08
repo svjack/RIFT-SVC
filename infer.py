@@ -11,7 +11,7 @@ from rift_svc import DiT, RF
 from rift_svc.feature_extractors import HubertModelWithFinalProj, RMSExtractor, get_mel_spectrogram
 from rift_svc.nsf_hifigan import NsfHifiGAN
 from rift_svc.rmvpe import RMVPE
-from rift_svc.utils import linear_interpolate_tensor, post_process_f0, f0_ensemble, get_f0_pw, get_f0_pm
+from rift_svc.utils import linear_interpolate_tensor, post_process_f0, f0_ensemble, f0_ensemble_light, get_f0_pw, get_f0_pm
 from slicer import Slicer
 
 
@@ -80,7 +80,7 @@ def apply_fade(audio, fade_samples, fade_in=True):
 
 def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_extractor, 
                      device, key_shift=0, ds_cfg_strength=0.0, cvec_downsample_rate=2, target_loudness=-18.0,
-                     robust_f0=False):
+                     robust_f0=0):
     """Extract all required features from an audio segment"""
     # Normalize input segment
     meter = pyln.Meter(sample_rate, block_size=0.1)
@@ -122,7 +122,7 @@ def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_
         cvec_ds = None
 
     # Extract f0
-    if robust_f0:
+    if robust_f0 > 0:
         # Parameters for F0 extraction
         time_step = hop_length / sample_rate
         f0_min = 40
@@ -133,10 +133,16 @@ def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_
         rmvpe_f0 = post_process_f0(rmvpe_f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
         pw_f0 = get_f0_pw(normalized_audio, sample_rate, time_step, f0_min, f0_max)
         pmac_f0 = get_f0_pm(normalized_audio, sample_rate, time_step, f0_min, f0_max)
-        # Combine using ensemble method
-        f0 = f0_ensemble(rmvpe_f0, pw_f0, pmac_f0)
+        
+        if robust_f0 == 1:
+            # Level 1: Light ensemble that preserves expressiveness
+            rms_np = rms_extractor(audio_tensor).squeeze().cpu().numpy()
+            f0 = f0_ensemble_light(rmvpe_f0, pw_f0, pmac_f0, rms=rms_np)
+        else:
+            # Level 2: Strong ensemble with more filtering
+            f0 = f0_ensemble(rmvpe_f0, pw_f0, pmac_f0)
     else:
-        # Use only RMVPE for F0 extraction (original method)
+        # Level 0: Use only RMVPE for F0 extraction (original method)
         f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
         f0 = post_process_f0(f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
     
@@ -314,9 +320,9 @@ def process_segment(
     target_loudness=-18.0,
     restore_loudness=True,
     sliced_inference=False,
-    robust_f0=False
+    robust_f0=0
 ):
-    """Process a single audio segment with consistent handling"""
+    """Process a single audio segment and return the converted audio"""
     # Extract features
     mel, cvec, cvec_ds, f0, rms, original_loudness = extract_features(
         audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_extractor, 
@@ -363,7 +369,7 @@ def process_segment(
 @click.option('--restore-loudness', default=True, help='Restore loudness to original')
 @click.option('--fade-duration', type=float, default=20.0, help='Fade duration in milliseconds')
 @click.option('--sliced-inference', is_flag=True, default=False, help='Use sliced inference for processing long segments')
-@click.option('--robust-f0', is_flag=True, default=False, help='Use robust f0 estimation')
+@click.option('--robust-f0', type=int, default=0, help='Level of robust f0 filtering (0=none, 1=light, 2=aggressive)')
 def main(
     model,
     input,
