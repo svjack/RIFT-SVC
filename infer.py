@@ -370,13 +370,11 @@ def process_segment(
 @click.option('--fade-duration', type=float, default=20.0, help='Fade duration in milliseconds')
 @click.option('--sliced-inference', is_flag=True, default=False, help='Use sliced inference for processing long segments')
 @click.option('--robust-f0', type=int, default=0, help='Level of robust f0 filtering (0=none, 1=light, 2=aggressive)')
-@click.option('--slicer-threshold', type=float, default=-35.0, help='Threshold for audio slicing in dB')
+@click.option('--slicer-threshold', type=float, default=-30.0, help='Threshold for audio slicing in dB')
 @click.option('--slicer-min-length', type=int, default=3000, help='Minimum length of audio segments in milliseconds')
 @click.option('--slicer-min-interval', type=int, default=100, help='Minimum interval between audio segments in milliseconds')
-@click.option('--slicer-hop-size', type=int, default=10, help='Hop size for audio slicing in milliseconds')
-@click.option('--slicer-max-sil-kept', type=int, default=300, help='Maximum silence kept in milliseconds')
-@click.option('--slicer-look-ahead', type=int, default=4, help='Number of look-ahead frames for audio slicing')
-@click.option('--slicer-min-slice-length', type=int, default=2000, help='Minimum slice length in milliseconds')
+@click.option('--slicer-hop-size', type=int, default=20, help='Hop size for audio slicing in milliseconds')
+@click.option('--slicer-max-sil-kept', type=int, default=5000, help='Maximum silence kept in milliseconds')
 def main(
     model,
     input,
@@ -400,9 +398,7 @@ def main(
     slicer_min_length,
     slicer_min_interval,
     slicer_hop_size,
-    slicer_max_sil_kept,
-    slicer_look_ahead,
-    slicer_min_slice_length
+    slicer_max_sil_kept
 ):
     """Convert the voice in an audio file to a target speaker."""
 
@@ -434,8 +430,6 @@ def main(
         min_interval=slicer_min_interval,
         hop_size=slicer_hop_size,
         max_sil_kept=slicer_max_sil_kept,
-        look_ahead_frames=slicer_look_ahead,
-        min_slice_length=slicer_min_slice_length
     )
 
     # Step (1): Use slicer to segment the input audio and get positions

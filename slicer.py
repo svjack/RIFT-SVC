@@ -1,59 +1,23 @@
-import numpy as np
-import warnings
 import logging
+import warnings
+
+import librosa
+
 warnings.filterwarnings('ignore')
 
 # Configure logging at the top of your slicer.py
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# This function is obtained from librosa.
-def get_rms(
-    y,
-    *,
-    frame_length=2048,
-    hop_length=512,
-    pad_mode="constant",
-):
-    padding = (int(frame_length // 2), int(frame_length // 2))
-    y = np.pad(y, padding, mode=pad_mode)
-
-    axis = -1
-    # put our new within-frame axis at the end for now
-    out_strides = y.strides + tuple([y.strides[axis]])
-    # Reduce the shape on the framing axis
-    x_shape_trimmed = list(y.shape)
-    x_shape_trimmed[axis] -= frame_length - 1
-    out_shape = tuple(x_shape_trimmed) + tuple([frame_length])
-    xw = np.lib.stride_tricks.as_strided(
-        y, shape=out_shape, strides=out_strides
-    )
-    if axis < 0:
-        target_axis = axis - 1
-    else:
-        target_axis = axis + 1
-    xw = np.moveaxis(xw, -1, target_axis)
-    # Downsample along the target axis
-    slices = [slice(None)] * xw.ndim
-    slices[axis] = slice(0, None, hop_length)
-    x = xw[tuple(slices)]
-
-    # Calculate power
-    power = np.mean(np.abs(x) ** 2, axis=-2, keepdims=True)
-
-    return np.sqrt(power)
-
 
 class Slicer:
     def __init__(self,
                  sr: int,
                  threshold: float = -30.,
-                 min_length: int = 5000,
+                 min_length: int = 3000,
                  min_interval: int = 100,
-                 hop_size: int = 10,
-                 max_sil_kept: int = 300,
-                 look_ahead_frames: int = 4,
-                 min_slice_length: int = 3000):
+                 hop_size: int = 20,
+                 max_sil_kept: int = 5000):
         if not min_length >= min_interval >= hop_size:
             raise ValueError('The following condition must be satisfied: min_length >= min_interval >= hop_size')
         if not max_sil_kept >= hop_size:
@@ -66,116 +30,36 @@ class Slicer:
         self.min_length = round(sr * min_length / 1000 / self.hop_size)
         self.min_interval = round(min_interval / self.hop_size)
         self.max_sil_kept = round(sr * max_sil_kept / 1000 / self.hop_size)
-        self.look_ahead = look_ahead_frames
-        self.min_slice_length = round(sr * min_slice_length / 1000 / self.hop_size)
 
-    def _find_zero_crossing(self, waveform, start_idx, end_idx, direction='forward'):
-        """Find the nearest zero crossing point in the given range."""
-        if len(waveform.shape) > 1:
-            samples = waveform.mean(axis=0)
-        else:
-            samples = waveform
-            
-        # Ensure we stay within bounds
-        start_idx = max(0, start_idx)
-        end_idx = min(len(samples), end_idx)
-        
-        # Convert indices to time (in seconds)
-        start_time = start_idx / self.sr
-        end_time = end_idx / self.sr
-        
-        logger.debug(f"_find_zero_crossing called with start_idx={start_idx} ({start_time:.3f}s), end_idx={end_idx} ({end_time:.3f}s), direction={direction}")
-
-        if direction == 'forward':
-            search_range = range(start_idx, end_idx - 1)
-        else:  # backward
-            search_range = range(end_idx - 2, start_idx - 1, -1)
-            
-        for i in search_range:
-            if samples[i] * samples[i + 1] <= 0:  # Zero crossing found
-                # Determine which point is closer to zero
-                closer_point = i if abs(samples[i]) < abs(samples[i + 1]) else i + 1
-                logger.debug(f"Zero crossing found at index {closer_point}")
-                return closer_point
-
-        logger.debug("No zero crossing found in the specified range.")
-        return start_idx if direction == 'forward' else end_idx - 1
-
-    def _find_best_cut_point(self, waveform, frame_idx, is_start=False):
-        """Find the best cut point near the given frame index."""
-        # Convert frame index to sample index
-        sample_idx = frame_idx * self.hop_size
-        
-        # For the start of audio, we want a clean ramp up from true silence
-        if is_start:
-            # Look for the first non-zero sample
-            if len(waveform.shape) > 1:
-                samples = waveform.mean(axis=0)
-            else:
-                samples = waveform
-            
-            # Define search window
-            search_end = min(len(samples), sample_idx + self.hop_size * 2)
-            
-            # Find first significant sample (above noise floor)
-            noise_floor = self.threshold * 0.1  # More sensitive threshold for start detection
-            for i in range(sample_idx, search_end):
-                if abs(samples[i]) > noise_floor:
-                    # Back up a few samples to ensure clean start
-                    return max(0, i - 32) // self.hop_size  # 32 samples for small padding
-            
-            return sample_idx // self.hop_size
-            
-        # Normal zero-crossing search for other positions
-        window_size = self.hop_size
-        start_search = max(0, sample_idx - window_size)
-        end_search = min(len(waveform) if len(waveform.shape) == 1 else waveform.shape[1], 
-                        sample_idx + window_size)
-        
-        cut_point = self._find_zero_crossing(waveform, start_search, end_search)
-        return cut_point // self.hop_size
 
     def _apply_slice(self, waveform, begin, end):
-        """Apply slice with zero-crossing adjustment."""
-        # Find actual cut points at zero crossings
-        actual_begin = self._find_zero_crossing(waveform, 
-                                              begin * self.hop_size, 
-                                              (begin + self.look_ahead) * self.hop_size,
-                                              'forward')
-        actual_end = self._find_zero_crossing(waveform,
-                                            (end - self.look_ahead) * self.hop_size,
-                                            end * self.hop_size,
-                                            'backward')
-        
         if len(waveform.shape) > 1:
-            return waveform[:, actual_begin:actual_end]
+            return waveform[:, begin * self.hop_size: min(waveform.shape[1], end * self.hop_size)]
         else:
-            return waveform[actual_begin:actual_end]
+            return waveform[begin * self.hop_size: min(waveform.shape[0], end * self.hop_size)]
+
 
     def slice(self, waveform):
         if len(waveform.shape) > 1:
-            samples = waveform.mean(axis=0)
+            samples = librosa.to_mono(waveform)
         else:
             samples = waveform
-        if (samples.shape[0] + self.hop_size - 1) // self.hop_size <= self.min_length:
-            # Find optimal start point even for single-chunk case
-            start_pos = self._find_best_cut_point(waveform, 0, is_start=True) * self.hop_size
-            return [(start_pos, waveform[start_pos:])]
-
-        rms_list = get_rms(y=samples, frame_length=self.win_size, hop_length=self.hop_size).squeeze(0)
+        if samples.shape[0] <= self.min_length:
+            # Return the entire audio as a single chunk
+            return [(0, waveform)]
+            
+        rms_list = librosa.feature.rms(y=samples, frame_length=self.win_size, hop_length=self.hop_size).squeeze(0)
         sil_tags = []
         silence_start = None
         clip_start = 0
-        
-        # Detect silence regions
         for i, rms in enumerate(rms_list):
-            # Keep looping while frame is silent
+            # Keep looping while frame is silent.
             if rms < self.threshold:
-                # Record start of silent frames
+                # Record start of silent frames.
                 if silence_start is None:
                     silence_start = i
                 continue
-            # Keep looping while frame is not silent and silence start has not been recorded
+            # Keep looping while frame is not silent and silence start has not been recorded.
             if silence_start is None:
                 continue
             # Clear recorded silence start if interval is not enough or clip is too short
@@ -184,7 +68,7 @@ class Slicer:
             if not is_leading_silence and not need_slice_middle:
                 silence_start = None
                 continue
-            # Need slicing. Record the range of silent frames to be removed
+            # Need slicing. Record the range of silent frames to be removed.
             if i - silence_start <= self.max_sil_kept:
                 pos = rms_list[silence_start: i + 1].argmin() + silence_start
                 if silence_start == 0:
@@ -212,87 +96,60 @@ class Slicer:
                     sil_tags.append((pos_l, pos_r))
                 clip_start = pos_r
             silence_start = None
-
-        # Deal with trailing silence
+        
+        # Deal with trailing silence.
         total_frames = rms_list.shape[0]
         if silence_start is not None and total_frames - silence_start >= self.min_interval:
             silence_end = min(total_frames, silence_start + self.max_sil_kept)
             pos = rms_list[silence_start: silence_end + 1].argmin() + silence_start
             sil_tags.append((pos, total_frames + 1))
-
-        # Apply and return slices
+        
+        # Apply and return slices.
         if len(sil_tags) == 0:
-            # Find optimal start point
-            start_pos = self._find_best_cut_point(waveform, 0, is_start=True) * self.hop_size
-            return [(start_pos, waveform[start_pos:])]
-        else:
-            chunks_with_pos = []
-            if sil_tags[0][0] > 0:
-                # Find optimal starting point for first chunk
-                start_frame = self._find_best_cut_point(waveform, 0, is_start=True)
-                end_frame = self._find_best_cut_point(waveform, sil_tags[0][0])
+            # Return the entire audio as a single chunk if no silence detected
+            return [(0, waveform)]
+        
+        # Extract non-silence chunks
+        non_silence_chunks = []
+        
+        # Add first non-silence chunk if it exists
+        if sil_tags[0][0] > 0:
+            start_pos = 0
+            end_frame = sil_tags[0][0]
+            chunk = self._apply_slice(waveform, 0, end_frame)
+            non_silence_chunks.append((start_pos, chunk))
+        
+        # Add middle non-silence chunks
+        for i in range(1, len(sil_tags)):
+            start_frame = sil_tags[i-1][1]
+            end_frame = sil_tags[i][0]
+            if start_frame < end_frame:  # Only add if there's actual non-silence content
                 start_pos = start_frame * self.hop_size
-                chunks_with_pos.append((
-                    start_pos,
-                    self._apply_slice(waveform, start_frame, end_frame)
-                ))
+                chunk = self._apply_slice(waveform, start_frame, end_frame)
+                non_silence_chunks.append((start_pos, chunk))
+        
+        # Add last non-silence chunk if it exists
+        if sil_tags[-1][1] * self.hop_size < len(waveform):
+            start_frame = sil_tags[-1][1]
+            start_pos = start_frame * self.hop_size
+            chunk = self._apply_slice(waveform, start_frame, total_frames)
+            non_silence_chunks.append((start_pos, chunk))
+        
+        for i, (start_pos, chunk) in enumerate(non_silence_chunks):
+            # Calculate start and end times in seconds
+            start_time_sec = start_pos / self.sr
+            end_time_sec = start_pos / self.sr + len(chunk) / self.sr if len(chunk.shape) == 1 else start_pos / self.sr + chunk.shape[1] / self.sr
+            duration_sec = end_time_sec - start_time_sec
+            
+            # Format start and end times as mm:ss
+            start_min, start_sec = divmod(start_time_sec, 60)
+            end_min, end_sec = divmod(end_time_sec, 60)
+            
+            # Log the information
+            logger.info(f"Chunk {i}: Start={int(start_min):02d}:{start_sec:05.2f}, End={int(end_min):02d}:{end_sec:05.2f}, Duration={duration_sec:.2f}s")
+        
+        return non_silence_chunks
 
-            for i in range(len(sil_tags) - 1):
-                start_frame = self._find_best_cut_point(waveform, sil_tags[i][1])
-                end_frame = self._find_best_cut_point(waveform, sil_tags[i + 1][0])
-                start_pos = start_frame * self.hop_size
-                chunks_with_pos.append((
-                    start_pos,
-                    self._apply_slice(waveform, start_frame, end_frame)
-                ))
-
-            if sil_tags[-1][1] < total_frames:
-                start_frame = self._find_best_cut_point(waveform, sil_tags[-1][1])
-                start_pos = start_frame * self.hop_size
-                chunks_with_pos.append((
-                    start_pos,
-                    self._apply_slice(waveform, start_frame, total_frames)
-                ))
-
-            # Enhanced merging logic to avoid too short slices
-            merged_chunks = []
-            prev_pos, prev_chunk = None, None
-
-            for pos, chunk in chunks_with_pos:
-                chunk_length = len(chunk) // self.hop_size  # Calculate slice length in frames
-                if chunk_length < self.min_slice_length:
-                    if prev_chunk is not None:
-                        # Merge with the previous slice using concatenation
-                        merged_chunk = np.concatenate((prev_chunk, chunk), axis=0)
-                        if merged_chunks:
-                            merged_chunks[-1] = (prev_pos, merged_chunk)
-                        else:
-                            # If merged_chunks is empty, append the merged chunk
-                            merged_chunks.append((prev_pos, merged_chunk))
-                        prev_pos, prev_chunk = None, None
-                    else:
-                        # Temporarily store to merge with next slice
-                        prev_pos, prev_chunk = pos, chunk
-                        continue
-                else:
-                    if prev_chunk is not None:
-                        # Merge the previously stored short slice with the current slice
-                        merged_chunk = np.concatenate((prev_chunk, chunk), axis=0)
-                        merged_chunks.append((prev_pos, merged_chunk))
-                        prev_pos, prev_chunk = None, None
-                    else:
-                        merged_chunks.append((pos, chunk))
-
-            # If there's a remaining short slice at the end, merge it with the last chunk if possible
-            if prev_chunk is not None:
-                if merged_chunks:
-                    last_pos, last_chunk = merged_chunks[-1]
-                    merged_chunks[-1] = (last_pos, np.concatenate((last_chunk, prev_chunk), axis=0))
-                else:
-                    # If no chunks exist yet, just add the remaining chunk
-                    merged_chunks.append((prev_pos, prev_chunk))
-
-            return merged_chunks
 
 
 def main():
@@ -330,11 +187,13 @@ def main():
         max_sil_kept=args.max_sil_kept
     )
     
+    # Get non-silence chunks with their positions
     chunks_with_pos = slicer.slice(audio)
     
     if not os.path.exists(out):
         os.makedirs(out)
     
+    logger.info(f"Saving {len(chunks_with_pos)} non-silence audio chunks...")
     for i, (pos, chunk) in enumerate(chunks_with_pos):
         if len(chunk.shape) > 1:
             chunk = chunk.T
@@ -347,6 +206,7 @@ def main():
             chunk, 
             sr
         )
+    logger.info(f"Done! Files saved to {out}")
 
 
 if __name__ == '__main__':
