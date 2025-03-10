@@ -10,6 +10,7 @@ logs/*
 
 .vscode/*
 .cache/*
+.gradio/*
 
 pretrained/README.md
 !pretrained/download.py
