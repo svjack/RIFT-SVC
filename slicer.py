@@ -157,9 +157,10 @@ def main():
     from argparse import ArgumentParser
     import librosa
     import soundfile
+    from pathlib import Path
 
     parser = ArgumentParser()
-    parser.add_argument('audio', type=str, help='The audio to be sliced')
+    parser.add_argument('audio', type=str, help='The audio file or directory to be sliced')
     parser.add_argument('--out', type=str, help='Output directory of the sliced audio clips')
     parser.add_argument('--db_thresh', type=float, required=False, default=-30,
                         help='The dB threshold for silence detection')
@@ -167,46 +168,84 @@ def main():
                         help='The minimum milliseconds required for each sliced audio clip')
     parser.add_argument('--min_interval', type=int, required=False, default=100,
                         help='The minimum milliseconds for a silence part to be sliced')
-    parser.add_argument('--hop_size', type=int, required=False, default=10,
+    parser.add_argument('--hop_size', type=int, required=False, default=20,
                         help='Frame length in milliseconds')
-    parser.add_argument('--max_sil_kept', type=int, required=False, default=300,
+    parser.add_argument('--max_sil_kept', type=int, required=False, default=5000,
                         help='The maximum silence length kept around the sliced clip, presented in milliseconds')
     args = parser.parse_args()
     
+    # Determine if the input is a file or directory
+    audio_path = Path(args.audio)
+    is_directory = audio_path.is_dir()
+    
+    # Prepare output directory
     out = args.out
     if out is None:
-        out = os.path.dirname(os.path.abspath(args.audio))
-    
-    audio, sr = librosa.load(args.audio, sr=None, mono=False)
-    slicer = Slicer(
-        sr=sr,
-        threshold=args.db_thresh,
-        min_length=args.min_length,
-        min_interval=args.min_interval,
-        hop_size=args.hop_size,
-        max_sil_kept=args.max_sil_kept
-    )
-    
-    # Get non-silence chunks with their positions
-    chunks_with_pos = slicer.slice(audio)
+        if is_directory:
+            out = os.path.abspath(args.audio)
+        else:
+            out = os.path.dirname(os.path.abspath(args.audio))
     
     if not os.path.exists(out):
         os.makedirs(out)
     
-    logger.info(f"Saving {len(chunks_with_pos)} non-silence audio chunks...")
-    for i, (pos, chunk) in enumerate(chunks_with_pos):
-        if len(chunk.shape) > 1:
-            chunk = chunk.T
-        soundfile.write(
-            os.path.join(out, f'%s_%d_pos_%d.wav' % (
-                os.path.basename(args.audio).rsplit('.', maxsplit=1)[0], 
-                i,
-                pos
-            )), 
-            chunk, 
-            sr
+    # Audio file extensions to process
+    audio_extensions = ['.wav', '.mp3', '.flac', '.ogg', '.m4a']
+    
+    # Process a single file or all files in a directory
+    if is_directory:
+        logger.info(f"Processing all audio files in directory: {args.audio}")
+        audio_files = []
+        for ext in audio_extensions:
+            audio_files.extend(list(audio_path.glob(f'*{ext}')))
+        
+        if not audio_files:
+            logger.warning(f"No audio files found in {args.audio}")
+            return
+        
+        logger.info(f"Found {len(audio_files)} audio files to process")
+        for audio_file in audio_files:
+            process_audio_file(audio_file, out, args)
+    else:
+        # Process a single audio file
+        logger.info(f"Processing single audio file: {args.audio}")
+        process_audio_file(audio_path, out, args)
+
+def process_audio_file(audio_file, out_dir, args):
+    """Process a single audio file with the given parameters"""
+    import os.path
+    import librosa
+    import soundfile
+    
+    try:
+        logger.info(f"Loading audio file: {audio_file}")
+        audio, sr = librosa.load(str(audio_file), sr=None, mono=False)
+        
+        slicer = Slicer(
+            sr=sr,
+            threshold=args.db_thresh,
+            min_length=args.min_length,
+            min_interval=args.min_interval,
+            hop_size=args.hop_size,
+            max_sil_kept=args.max_sil_kept
         )
-    logger.info(f"Done! Files saved to {out}")
+        
+        # Get non-silence chunks with their positions
+        chunks_with_pos = slicer.slice(audio)
+        
+        file_basename = os.path.basename(str(audio_file)).rsplit('.', maxsplit=1)[0]
+        logger.info(f"Saving {len(chunks_with_pos)} non-silence audio chunks from {file_basename}...")
+        
+        for i, (pos, chunk) in enumerate(chunks_with_pos):
+            if len(chunk.shape) > 1:
+                chunk = chunk.T
+            
+            output_file = os.path.join(out_dir, f'{file_basename}_{i}_pos_{pos}.wav')
+            soundfile.write(output_file, chunk, sr)
+        
+        logger.info(f"Finished processing {audio_file}")
+    except Exception as e:
+        logger.error(f"Error processing {audio_file}: {str(e)}")
 
 
 if __name__ == '__main__':
