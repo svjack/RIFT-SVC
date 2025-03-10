@@ -1,5 +1,7 @@
 # RIFT-SVC: Rectified Flow Transformer for Singing Voice Conversion
 
+[中文文档](README_CN.md)
+
 <p align="center"><img src="./assets/logo.png" alt="RIFT-SVC" width="200"/></p>
 
  Implementation of **RIFT-SVC**, a singing voice conversion model based on Rectified Flow Transformer. We tested several architecture-wise and training-wise improvements over vanilla Diffusion Transformer.
