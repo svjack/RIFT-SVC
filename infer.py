@@ -6,6 +6,7 @@ import torch
 import torchaudio
 from pathlib import Path
 from tqdm import tqdm
+from torch.amp import autocast
 
 from rift_svc import DiT, RF
 from rift_svc.feature_extractors import HubertModelWithFinalProj, RMSExtractor, get_mel_spectrogram
@@ -31,7 +32,7 @@ def extract_state_dict(ckpt):
     return new_state_dict, spk2idx, model_cfg, dataset_cfg
 
 
-def load_models(model_path, device):
+def load_models(model_path, device, use_fp16=True):
     """Load all required models and return them"""
     click.echo("Loading models...")
     
@@ -43,6 +44,11 @@ def load_models(model_path, device):
     svc_model = RF(transformer=transformer)
     svc_model.load_state_dict(state_dict)
     svc_model = svc_model.to(device)
+    
+    # Convert to half precision (float16) if specified and using CUDA
+    if use_fp16 and device != 'cpu':
+        svc_model = svc_model.half()
+    
     svc_model.eval()
     
     # Load additional models
@@ -50,6 +56,13 @@ def load_models(model_path, device):
     rmvpe = RMVPE(model_path="pretrained/rmvpe/model.pt", hop_length=160, device=device)
     hubert = HubertModelWithFinalProj.from_pretrained("pretrained/content-vec-best").to(device)
     rms_extractor = RMSExtractor().to(device)
+    
+    # Convert additional models to half precision if specified and using CUDA
+    if use_fp16 and device != 'cpu':
+        vocoder = vocoder.half()
+        hubert = hubert.half()
+        rms_extractor = rms_extractor.half()
+        # RMVPE model is handled separately as it may have custom implementation
     
     return svc_model, vocoder, rmvpe, hubert, rms_extractor, spk2idx, dataset_cfg
 
@@ -80,7 +93,7 @@ def apply_fade(audio, fade_samples, fade_in=True):
 
 def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_extractor, 
                      device, key_shift=0, ds_cfg_strength=0.0, cvec_downsample_rate=2, target_loudness=-18.0,
-                     robust_f0=0):
+                     robust_f0=0, use_fp16=True):
     """Extract all required features from an audio segment"""
     # Normalize input segment
     meter = pyln.Meter(sample_rate, block_size=0.1)
@@ -94,6 +107,11 @@ def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_
 
     audio_tensor = torch.from_numpy(normalized_audio).float().unsqueeze(0).to(device)
     audio_16khz = torch.from_numpy(librosa.resample(normalized_audio, orig_sr=sample_rate, target_sr=16000)).float().unsqueeze(0).to(device)
+    
+    # Convert to half precision if specified and using CUDA
+    if use_fp16 and device.type != 'cpu':
+        audio_tensor = audio_tensor.half()
+        audio_16khz = audio_16khz.half()
 
     # Extract mel spectrogram
     mel = get_mel_spectrogram(
@@ -108,7 +126,9 @@ def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_
     ).transpose(1, 2)
 
     # Extract content vector
-    cvec = hubert(audio_16khz)["last_hidden_state"].squeeze(0)
+    device_type = 'cuda' if device.type == 'cuda' else 'cpu'
+    with autocast(device_type=device_type, enabled=use_fp16):
+        cvec = hubert(audio_16khz)["last_hidden_state"].squeeze(0)
     cvec = linear_interpolate_tensor(cvec, mel.shape[1])[None, :]
 
     # Create bad_cvec (downsampled) for classifier-free guidance
@@ -129,21 +149,25 @@ def extract_features(audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_
         f0_max = 1100
         
         # Extract F0 using multiple methods
-        rmvpe_f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
+        with autocast(device_type=device_type, enabled=use_fp16):
+            rmvpe_f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
         rmvpe_f0 = post_process_f0(rmvpe_f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
         pw_f0 = get_f0_pw(normalized_audio, sample_rate, time_step, f0_min, f0_max)
         pmac_f0 = get_f0_pm(normalized_audio, sample_rate, time_step, f0_min, f0_max)
         
         if robust_f0 == 1:
             # Level 1: Light ensemble that preserves expressiveness
-            rms_np = rms_extractor(audio_tensor).squeeze().cpu().numpy()
+            with autocast(device_type=device_type, enabled=use_fp16):
+                rms_np = rms_extractor(audio_tensor).squeeze().cpu().numpy()
             f0 = f0_ensemble_light(rmvpe_f0, pw_f0, pmac_f0, rms=rms_np)
         else:
             # Level 2: Strong ensemble with more filtering
             f0 = f0_ensemble(rmvpe_f0, pw_f0, pmac_f0)
     else:
         # Level 0: Use only RMVPE for F0 extraction (original method)
-        f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
+        device_type = 'cuda' if device.type == 'cuda' else 'cpu'
+        with autocast(device_type=device_type, enabled=use_fp16):
+            f0 = rmvpe.infer_from_audio(audio_tensor, sample_rate=sample_rate, device=device)
         f0 = post_process_f0(f0, sample_rate, hop_length, mel.shape[1], silence_front=0.0, cut_last=False)
     
     if key_shift != 0:
@@ -160,9 +184,11 @@ def run_inference(
     model, mel, cvec, f0, rms, cvec_ds, spk_id, 
     infer_steps, ds_cfg_strength, spk_cfg_strength, 
     skip_cfg_strength, cfg_skip_layers, cfg_rescale,
-    sliced_inference=False
+    sliced_inference=False, use_fp16=True
 ):
     """Run the actual inference through the model"""
+    device_type = 'cuda' if mel.device.type == 'cuda' else 'cpu'
+    
     if sliced_inference:
         # Use sliced inference for long segments
         sliced_len = 256
@@ -170,20 +196,21 @@ def run_inference(
         
         # If the segment is shorter than one slice, just process it directly
         if mel.shape[1] <= sliced_len:
-            mel_out, _ = model.sample(
-                src_mel=mel,
-                spk_id=spk_id,
-                f0=f0,
-                rms=rms,
-                cvec=cvec,
-                steps=infer_steps,
-                bad_cvec=cvec_ds,
-                ds_cfg_strength=ds_cfg_strength,
-                spk_cfg_strength=spk_cfg_strength,
-                skip_cfg_strength=skip_cfg_strength,
-                cfg_skip_layers=cfg_skip_layers,
-                cfg_rescale=cfg_rescale,
-            )
+            with autocast(device_type=device_type, enabled=use_fp16):
+                mel_out, _ = model.sample(
+                    src_mel=mel,
+                    spk_id=spk_id,
+                    f0=f0,
+                    rms=rms,
+                    cvec=cvec,
+                    steps=infer_steps,
+                    bad_cvec=cvec_ds,
+                    ds_cfg_strength=ds_cfg_strength,
+                    spk_cfg_strength=spk_cfg_strength,
+                    skip_cfg_strength=skip_cfg_strength,
+                    cfg_skip_layers=cfg_skip_layers,
+                    cfg_rescale=cfg_rescale,
+                )
             return mel_out
         
         # Create a tensor to hold the full output with crossfading
@@ -210,21 +237,22 @@ def run_inference(
             if cvec_ds is not None:
                 cvec_ds_slice = cvec_ds[:, start_idx:end_idx, :]
             
-            # Process with model
-            mel_out_slice, _ = model.sample(
-                src_mel=mel_slice,
-                spk_id=spk_id,
-                f0=f0_slice,
-                rms=rms_slice,
-                cvec=cvec_slice,
-                steps=infer_steps,
-                bad_cvec=cvec_ds_slice,
-                ds_cfg_strength=ds_cfg_strength,
-                spk_cfg_strength=spk_cfg_strength,
-                skip_cfg_strength=skip_cfg_strength,
-                cfg_skip_layers=cfg_skip_layers,
-                cfg_rescale=cfg_rescale,
-            )
+            # Process with model using mixed precision if enabled
+            with autocast(device_type=device_type, enabled=use_fp16):
+                mel_out_slice, _ = model.sample(
+                    src_mel=mel_slice,
+                    spk_id=spk_id,
+                    f0=f0_slice,
+                    rms=rms_slice,
+                    cvec=cvec_slice,
+                    steps=infer_steps,
+                    bad_cvec=cvec_ds_slice,
+                    ds_cfg_strength=ds_cfg_strength,
+                    spk_cfg_strength=spk_cfg_strength,
+                    skip_cfg_strength=skip_cfg_strength,
+                    cfg_skip_layers=cfg_skip_layers,
+                    cfg_rescale=cfg_rescale,
+                )
             
             # Create crossfade weights
             slice_len = end_idx - start_idx
@@ -246,49 +274,50 @@ def run_inference(
                 if actual_crossfade_len > 0:  # Only apply if we have space
                     fade_in = torch.linspace(0, 1, actual_crossfade_len, device=mel.device)
                     weights[:, :actual_crossfade_len, :] = fade_in.view(1, -1, 1)
-            else:  # Middle slices
-                # Crossfade both sides, handling the case where slice_len < 2*mel_crossfade_len
+            else:  # Middle slice
+                # Crossfade both ends
                 weights = torch.ones((1, slice_len, 1), device=mel.device)
-                
-                # Determine the actual crossfade length (might be shorter for small slices)
-                actual_crossfade_len = min(mel_crossfade_len, slice_len // 2)
-                if actual_crossfade_len > 0:
-                    fade_in = torch.linspace(0, 1, actual_crossfade_len, device=mel.device)
-                    fade_out = torch.linspace(1, 0, actual_crossfade_len, device=mel.device)
-                    weights[:, :actual_crossfade_len, :] = fade_in.view(1, -1, 1)
-                    weights[:, -actual_crossfade_len:, :] = fade_out.view(1, -1, 1)
+                # Fade in at the beginning
+                if mel_crossfade_len > 0:  # Only apply if we have space
+                    fade_in = torch.linspace(0, 1, mel_crossfade_len, device=mel.device)
+                    weights[:, :mel_crossfade_len, :] = fade_in.view(1, -1, 1)
+                # Fade out at the end
+                if mel_crossfade_len > 0:  # Only apply if we have space
+                    fade_out = torch.linspace(1, 0, mel_crossfade_len, device=mel.device)
+                    weights[:, -mel_crossfade_len:, :] = fade_out.view(1, -1, 1)
             
-            # Apply weights to current slice output
-            mel_out_slice = mel_out_slice * weights
-            
-            # Add to the appropriate region of the output
-            full_mel_out[:, start_idx:end_idx, :] += mel_out_slice
+            # Apply weighted update to the output
+            full_mel_out[:, start_idx:end_idx, :] += weights * mel_out_slice
             
         # Return the full crossfaded output
         mel_out = full_mel_out
     else:
-        # Process the entire segment at once
-        mel_out, _ = model.sample(
-            src_mel=mel,
-            spk_id=spk_id,
-            f0=f0,
-            rms=rms,
-            cvec=cvec,
-            steps=infer_steps,
-            bad_cvec=cvec_ds,
-            ds_cfg_strength=ds_cfg_strength,
-            spk_cfg_strength=spk_cfg_strength,
-            skip_cfg_strength=skip_cfg_strength,
-            cfg_skip_layers=cfg_skip_layers,
-            cfg_rescale=cfg_rescale,
-        )
+        # Process the entire segment at once with mixed precision if enabled
+        with autocast(device_type=device_type, enabled=use_fp16):
+            mel_out, _ = model.sample(
+                src_mel=mel,
+                spk_id=spk_id,
+                f0=f0,
+                rms=rms,
+                cvec=cvec,
+                steps=infer_steps,
+                bad_cvec=cvec_ds,
+                ds_cfg_strength=ds_cfg_strength,
+                spk_cfg_strength=spk_cfg_strength,
+                skip_cfg_strength=skip_cfg_strength,
+                cfg_skip_layers=cfg_skip_layers,
+                cfg_rescale=cfg_rescale,
+            )
     
     return mel_out
 
 
-def generate_audio(vocoder, mel_out, f0, original_loudness=None, restore_loudness=True):
+def generate_audio(vocoder, mel_out, f0, original_loudness=None, restore_loudness=True, use_fp16=True):
     """Generate audio from mel spectrogram using vocoder"""
-    audio_out = vocoder(mel_out.transpose(1, 2), f0)
+    # Use mixed precision for vocoder inference if enabled
+    device_type = 'cuda' if mel_out.device.type == 'cuda' else 'cpu'
+    with autocast(device_type=device_type, enabled=use_fp16):
+        audio_out = vocoder(mel_out.transpose(1, 2), f0)
     audio_out = audio_out.squeeze().cpu().numpy()
 
     if restore_loudness and original_loudness is not None:
@@ -320,32 +349,49 @@ def process_segment(
     target_loudness=-18.0,
     restore_loudness=True,
     sliced_inference=False,
-    robust_f0=0
+    robust_f0=0,
+    use_fp16=True
 ):
     """Process a single audio segment and return the converted audio"""
     # Extract features
     mel, cvec, cvec_ds, f0, rms, original_loudness = extract_features(
         audio_segment, sample_rate, hop_length, rmvpe, hubert, rms_extractor, 
         device, key_shift, ds_cfg_strength, cvec_downsample_rate, target_loudness,
-        robust_f0
+        robust_f0, use_fp16
     )
     
-    # Prepare speaker ID
+    # Apply key shift to F0 if needed (the new implementation already applies this in extract_features)
+    if key_shift != 0 and False:  # Disabled because it's already applied
+        f0_shift_factor = 2 ** (key_shift / 12)
+        f0 = f0 * f0_shift_factor
+    
+    # Prepare speaker ID - convert to tensor
     spk_id = torch.LongTensor([speaker_id]).to(device)
     
-    # Run inference
+    # Run inference to generate output mel spectrogram
     mel_out = run_inference(
-        svc_model, mel, cvec, f0, rms, cvec_ds, spk_id,
-        infer_steps, ds_cfg_strength, spk_cfg_strength,
-        skip_cfg_strength, cfg_skip_layers, cfg_rescale,
-        sliced_inference
+        model=svc_model, 
+        mel=mel, 
+        cvec=cvec, 
+        f0=f0, 
+        rms=rms, 
+        cvec_ds=cvec_ds, 
+        spk_id=spk_id,
+        infer_steps=infer_steps,
+        ds_cfg_strength=ds_cfg_strength,
+        spk_cfg_strength=spk_cfg_strength,
+        skip_cfg_strength=skip_cfg_strength,
+        cfg_skip_layers=cfg_skip_layers,
+        cfg_rescale=cfg_rescale,
+        sliced_inference=sliced_inference,
+        use_fp16=use_fp16
     )
     
     # Generate audio
     audio_out = generate_audio(
         vocoder, mel_out, f0, 
         original_loudness if restore_loudness else None, 
-        restore_loudness
+        restore_loudness, use_fp16
     )
     
     return audio_out
@@ -373,8 +419,9 @@ def process_segment(
 @click.option('--slicer-threshold', type=float, default=-30.0, help='Threshold for audio slicing in dB')
 @click.option('--slicer-min-length', type=int, default=3000, help='Minimum length of audio segments in milliseconds')
 @click.option('--slicer-min-interval', type=int, default=100, help='Minimum interval between audio segments in milliseconds')
-@click.option('--slicer-hop-size', type=int, default=20, help='Hop size for audio slicing in milliseconds')
-@click.option('--slicer-max-sil-kept', type=int, default=5000, help='Maximum silence kept in milliseconds')
+@click.option('--slicer-hop-size', type=int, default=10, help='Hop size for audio slicing in milliseconds')
+@click.option('--slicer-max-sil-kept', type=int, default=200, help='Maximum silence kept in milliseconds')
+@click.option('--use-fp16', is_flag=True, default=True, help='Use float16 precision for faster inference')
 def main(
     model,
     input,
@@ -398,7 +445,8 @@ def main(
     slicer_min_length,
     slicer_min_interval,
     slicer_hop_size,
-    slicer_max_sil_kept
+    slicer_max_sil_kept,
+    use_fp16
 ):
     """Convert the voice in an audio file to a target speaker."""
 
@@ -408,7 +456,7 @@ def main(
     device = torch.device(device)
 
     # Load models
-    svc_model, vocoder, rmvpe, hubert, rms_extractor, spk2idx, dataset_cfg = load_models(model, device)
+    svc_model, vocoder, rmvpe, hubert, rms_extractor, spk2idx, dataset_cfg = load_models(model, device, use_fp16)
 
     try:
         speaker_id = spk2idx[speaker]
@@ -429,7 +477,7 @@ def main(
         min_length=slicer_min_length,
         min_interval=slicer_min_interval,
         hop_size=slicer_hop_size,
-        max_sil_kept=slicer_max_sil_kept,
+        max_sil_kept=slicer_max_sil_kept
     )
 
     # Step (1): Use slicer to segment the input audio and get positions
@@ -456,7 +504,7 @@ def main(
                 key_shift, infer_steps, ds_cfg_strength, spk_cfg_strength,
                 skip_cfg_strength, cfg_skip_layers, cfg_rescale,
                 cvec_downsample_rate, target_loudness, restore_loudness, sliced_inference,
-                robust_f0
+                robust_f0, use_fp16
             )
             
             # Ensure consistent length
