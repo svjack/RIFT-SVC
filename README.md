@@ -235,6 +235,21 @@ If you experience sudden audio gaps during playback or abnormal pitch jumps in t
 
 For 768-12 model, the VRAM consumption is ~3GB.
 
+
+##### GUI Inference
+
+To start the GUI application, run:
+
+```bash
+python gui_infer.py
+```
+
+For sharing the interface (creating a public URL), use:
+
+```bash
+python gui_infer.py --share
+```
+
 ---
 
 ## Key Technical Details
