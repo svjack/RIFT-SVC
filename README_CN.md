@@ -189,7 +189,8 @@ python infer.py \
 --output 0_steps32_cfg0.wav \
 --speaker speaker1 \
 --key-shift 0 \
---infer-steps 32
+--infer-steps 32 \
+--batch-size 1
 ```
 
 高级推理命令：
@@ -201,6 +202,7 @@ python infer.py \
 --speaker speaker1 \
 --key-shift 0 \
 --infer-steps 32 \
+--batch-size 4 \
 --ds-cfg-strength 0.1 \
 --spk-cfg-strength 0.2 \
 --skip-cfg-strength 0.1 \
@@ -216,6 +218,7 @@ python infer.py \
 - `--speaker`：用于声音转换的说话者名称。
 - `--key-shift`：以半音为单位的音高偏移（默认：0）。
 - `--infer-steps`：推理步骤的数量（默认：32）。更高的值可能会产生更好的质量，但需要更长的时间。
+- `--batch-size`: 并行推理的批处理大小（默认：1）。更高的值可以通过同时处理多个音频片段来加速推理，但需要更多的显存。
 - `--ds-cfg-strength`：内容向量引导强度（默认：0.0）。更高的值可以改善内容保留和咬字清晰度。过高会用力过猛。我们建议初始试用值为0.1。
 - `--spk-cfg-strength`：说话者引导强度（默认：0.0）。更高的值可以增强说话人相似度。过高可能导致音色失真。我们建议初始试用值为0.2-1。
 - `--skip-cfg-strength`：跳层引导强度（实验性功能，默认：0.0）。增强指定层的特征渲染。效果取决于目标层的功能。我们建议初始试用值为0.1。

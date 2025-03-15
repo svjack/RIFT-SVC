@@ -13,32 +13,27 @@ from infer import (
     load_models, 
     load_audio, 
     apply_fade, 
-    process_segment
+    batch_process_segments
 )
 
-# Global variables for models
 global svc_model, vocoder, rmvpe, hubert, rms_extractor, spk2idx, dataset_cfg, device
 svc_model = vocoder = rmvpe = hubert = rms_extractor = spk2idx = dataset_cfg = None
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Language dictionary for UI text
 LANGUAGES = {
     "En": {
-        # UI titles and headers
         "app_title": "RIFT-SVC Voice Conversion",
         "main_title": "🎤 RIFT-SVC Voice Conversion",
         "subtitle": "Convert singing or speech to target voice using RIFT-SVC model",
         "github_info": "🔗 <strong>Want to fine-tune your own speakers?</strong> Visit the <a href=\"https://github.com/Pur1zumu/RIFT-SVC\" target=\"_blank\">RIFT-SVC GitHub repository</a> for complete training and fine-tuning guides.",
         "audio_note": "📝 <strong>Note:</strong> For best results, use clean audio with minimal background noise.",
         
-        # Input section
         "input_section": "### 📥 Input",
         "model_path_label": "Model Path",
         "model_path_placeholder": "Enter your model file path",
         "load_model_btn": "🔄 Load Model",
         "input_audio_label": "Input Audio File",
         
-        # Basic parameters
         "basic_params": "⚙️ Basic Parameters",
         "target_speaker": "Target Speaker",
         "key_shift": "Key Shift (semitones)",
@@ -48,8 +43,9 @@ LANGUAGES = {
         "use_fp16_info": "Enable for better performance, may reduce precision on some GPUs",
         "pitch_filter": "Pitch Filter",
         "pitch_filter_info": "0=None, 1=Light filtering, 2=Strong filtering (helps with broken/choppy sounds)",
+        "batch_size": "Batch Size",
+        "batch_size_info": "Number of segments to process in parallel. Higher values can be faster on GPUs with sufficient memory.",
         
-        # Advanced parameters
         "adv_cfg_params": "🔬 Advanced CFG Parameters",
         "ds_cfg_strength": "Content Vector Guidance Strength",
         "ds_cfg_strength_info": "Higher values can improve content preservation and pronunciation clarity. Too high will be overkill.",
@@ -64,7 +60,6 @@ LANGUAGES = {
         "cvec_downsample": "Content Vector Downsample Rate for Reverse Guidance",
         "cvec_downsample_info": "Higher values (may) improve content clarity.",
         
-        # Slicer parameters
         "slicer_params": "✂️ Slicer Parameters",
         "slicer_threshold": "Threshold (dB)",
         "slicer_threshold_info": "Silence detection threshold",
@@ -77,13 +72,11 @@ LANGUAGES = {
         "slicer_max_sil": "Maximum Silence Kept (ms)",
         "slicer_max_sil_info": "Maximum silence length kept at each segment edge",
         
-        # Output section
         "convert_btn": "🎵 Convert Voice",
         "output_section": "### 📤 Output",
         "output_audio_label": "Converted Audio",
         "init_message": "⏳ Please load a model to begin.",
         
-        # Quick tips
         "quick_tips": "🔍 Quick Tips",
         "tips_content": """
                     <ul>
@@ -94,7 +87,6 @@ LANGUAGES = {
                     </ul>
                 """,
         
-        # Processing messages
         "processing": "⏳ Processing... Please wait.",
         "loading_audio": "Processing: Loading audio...",
         "slicing_audio": "Processing: Slicing audio...",
@@ -103,7 +95,6 @@ LANGUAGES = {
         "finalizing_audio": "Processing: Finalizing audio...",
         "processing_complete": "Processing complete!",
         
-        # Result and error messages
         "conversion_complete": "✅ Conversion complete! Converted to **{}** with **{}** semitone shift.",
         "error_no_audio": "❌ Error: No input audio provided.",
         "error_no_model": "❌ Error: Model not loaded. Please load a model first.",
@@ -118,21 +109,18 @@ LANGUAGES = {
         "error_details_label": "Error Details"
     },
     "中文": {
-        # UI titles and headers
         "app_title": "RIFT-SVC 声音转换",
         "main_title": "🎤 RIFT-SVC 歌声音色转换",
         "subtitle": "使用 RIFT-SVC 模型将歌声或语音转换为目标音色",
         "github_info": "🔗 <strong>想要微调自己的说话人？</strong> 请访问 <a href=\"https://github.com/Pur1zumu/RIFT-SVC\" target=\"_blank\">RIFT-SVC GitHub 仓库</a> 获取完整的训练和微调指南。",
         "audio_note": "📝 <strong>注意：</strong> 为获得最佳效果，请使用背景噪音较少的干净音频。",
         
-        # Input section
         "input_section": "### 📥 输入",
         "model_path_label": "模型路径",
         "model_path_placeholder": "请输入您的模型文件路径",
         "load_model_btn": "🔄 加载模型",
         "input_audio_label": "输入音频文件",
         
-        # Basic parameters
         "basic_params": "⚙️ 基本参数",
         "target_speaker": "目标说话人",
         "key_shift": "音调调整（半音）",
@@ -142,8 +130,9 @@ LANGUAGES = {
         "use_fp16_info": "启用以提高性能，在某些GPU上可能会降低精度",
         "pitch_filter": "音高滤波",
         "pitch_filter_info": "0=无，1=轻度过滤，2=强力过滤（有助于解决断音/破音问题）",
+        "batch_size": "批量大小",
+        "batch_size_info": "并行处理段落的数量。更高的值可以在具有足够内存的GPU上更快。",
         
-        # Advanced parameters
         "adv_cfg_params": "🔬 高级CFG参数",
         "ds_cfg_strength": "内容向量引导强度",
         "ds_cfg_strength_info": "更高的值可以改善内容保留和咬字清晰度。过高会用力过猛。",
@@ -158,7 +147,6 @@ LANGUAGES = {
         "cvec_downsample": "用于反向引导的内容向量下采样率",
         "cvec_downsample_info": "更高的值（可能）可以提高内容清晰度。",
         
-        # Slicer parameters
         "slicer_params": "✂️ 切片参数",
         "slicer_threshold": "阈值 (dB)",
         "slicer_threshold_info": "静音检测阈值",
@@ -171,13 +159,11 @@ LANGUAGES = {
         "slicer_max_sil": "保留的最大静音 (毫秒)",
         "slicer_max_sil_info": "保留在每个片段边缘的最大静音长度",
         
-        # Output section
         "convert_btn": "🎵 转换声音",
         "output_section": "### 📤 输出",
         "output_audio_label": "转换后的音频",
         "init_message": "⏳ 请加载模型以开始使用。",
         
-        # Quick tips
         "quick_tips": "🔍 快速提示",
         "tips_content": """
                     <ul>
@@ -188,7 +174,6 @@ LANGUAGES = {
                     </ul>
                 """,
         
-        # Processing messages
         "processing": "⏳ 处理中... 请稍候。",
         "loading_audio": "处理中: 加载音频...",
         "slicing_audio": "处理中: 切分音频...",
@@ -197,7 +182,6 @@ LANGUAGES = {
         "finalizing_audio": "处理中: 完成音频...",
         "processing_complete": "处理完成!",
         
-        # Result and error messages
         "conversion_complete": "✅ 转换完成! 已转换为 **{}** 并调整 **{}** 个半音。",
         "error_no_audio": "❌ 错误: 未提供输入音频。",
         "error_no_model": "❌ 错误: 模型未加载。请先加载模型。",
@@ -213,19 +197,14 @@ LANGUAGES = {
     }
 }
 
-# Default language
 current_language = "En"
 
 def initialize_models(model_path):
     global svc_model, vocoder, rmvpe, hubert, rms_extractor, spk2idx, dataset_cfg, current_language
     
-    # Get language dictionary
     lang = LANGUAGES[current_language]
-    
-    # Default to FP16, but will be overridden in processing
     use_fp16 = True
     
-    # Clean up memory before loading models
     if svc_model is not None:
         del svc_model
         del vocoder
@@ -236,7 +215,6 @@ def initialize_models(model_path):
         gc.collect()
     
     try:
-        # Check if the model file exists
         if not os.path.exists(model_path):
             return [], f"{lang['error_model_not_found']}: {model_path}"
         
@@ -255,14 +233,13 @@ def process_with_progress(
     infer_steps=32,
     robust_f0=1,
     use_fp16=True,
-    # Advanced CFG parameters
+    batch_size=1,
     ds_cfg_strength=0.1,
     spk_cfg_strength=1.0,
     skip_cfg_strength=0.0,
     cfg_skip_layers=6,
     cfg_rescale=0.7,
     cvec_downsample_rate=2,
-    # Slicer parameters
     slicer_threshold=-30.0,
     slicer_min_length=3000,
     slicer_min_interval=100,
@@ -271,16 +248,12 @@ def process_with_progress(
 ):
     global svc_model, vocoder, rmvpe, hubert, rms_extractor, spk2idx, dataset_cfg, current_language
     
-    # Get language dictionary
     lang = LANGUAGES[current_language]
     
-    # Fixed parameters
     target_loudness = -18.0
     restore_loudness = True
     fade_duration = 20.0
-    sliced_inference = False
     
-    # Input validation
     if input_audio is None:
         return None, lang["error_no_audio"]
     
@@ -290,28 +263,21 @@ def process_with_progress(
     if speaker is None or speaker not in spk2idx:
         return None, lang["error_invalid_speaker"].format(", ".join(spk2idx.keys()))
     
-    # Process the audio
     try:
-        # Update status message
         progress(0, desc=lang["loading_audio"])
         
-        # Convert speaker name to ID
         speaker_id = spk2idx[speaker]
         
-        # Get config from loaded model
         hop_length = 512
         sample_rate = 44100
         
-        # Handle negative skip_layers value as None
         if cfg_skip_layers < 0:
             cfg_skip_layers_value = None
         else:
             cfg_skip_layers_value = cfg_skip_layers
         
-        # Load audio
         audio = load_audio(input_audio, sample_rate)
         
-        # Initialize Slicer
         slicer = Slicer(
             sr=sample_rate,
             threshold=slicer_threshold,
@@ -322,75 +288,58 @@ def process_with_progress(
         )
         
         progress(0.1, desc=lang["slicing_audio"])
-        # Slice the input audio
         segments_with_pos = slicer.slice(audio)
         
         if not segments_with_pos:
             return None, lang["error_no_segments"]
         
-        # Calculate fade size in samples
         fade_samples = int(fade_duration * sample_rate / 1000)
-        
-        # Process segments
-        result_audio = np.zeros(len(audio) + fade_samples)  # Extra space for potential overlap
         
         progress(0.2, desc=lang["start_conversion"])
         
         with torch.no_grad():
-            for i, (start_sample, chunk) in enumerate(segments_with_pos):
-                segment_progress = 0.2 + (0.7 * (i / len(segments_with_pos)))
-                progress(segment_progress, desc=lang["processing_segment"].format(i+1, len(segments_with_pos)))
+            processed_segments = batch_process_segments(
+                segments_with_pos, svc_model, vocoder, rmvpe, hubert, rms_extractor,
+                speaker_id, sample_rate, hop_length, device,
+                key_shift, infer_steps, ds_cfg_strength, spk_cfg_strength,
+                skip_cfg_strength, cfg_skip_layers_value, cfg_rescale,
+                cvec_downsample_rate, target_loudness, restore_loudness,
+                robust_f0, use_fp16, batch_size, progress, lang["processing_segment"]
+            )
+            
+            result_audio = np.zeros(len(audio) + fade_samples)
+            
+            for idx, (start_sample, audio_out, expected_length) in enumerate(processed_segments):
+                segment_progress = 0.8 + (0.1 * (idx / len(processed_segments)))
+                progress(segment_progress, desc=lang["finalizing_audio"])
                 
-                # Process the segment
-                audio_out = process_segment(
-                    chunk, svc_model, vocoder, rmvpe, hubert, rms_extractor,
-                    speaker_id, sample_rate, hop_length, device,
-                    key_shift, infer_steps, ds_cfg_strength, spk_cfg_strength,
-                    skip_cfg_strength, cfg_skip_layers_value, cfg_rescale,
-                    cvec_downsample_rate, target_loudness, restore_loudness, sliced_inference,
-                    robust_f0, use_fp16
-                )
-                
-                # Ensure consistent length
-                expected_length = len(chunk)
                 if len(audio_out) > expected_length:
                     audio_out = audio_out[:expected_length]
                 elif len(audio_out) < expected_length:
                     audio_out = np.pad(audio_out, (0, expected_length - len(audio_out)), 'constant')
                 
-                # Apply fades
-                if i > 0:  # Not first segment
+                if idx > 0:
                     audio_out = apply_fade(audio_out.copy(), fade_samples, fade_in=True)
-                    result_audio[start_sample:start_sample + fade_samples] *= \
-                        np.linspace(1, 0, fade_samples)  # Fade out previous
+                    result_audio[start_sample:start_sample + fade_samples] *= np.linspace(1, 0, fade_samples)
                 
-                if i < len(segments_with_pos) - 1:  # Not last segment
-                    audio_out[-fade_samples:] *= np.linspace(1, 0, fade_samples)  # Fade out
+                if idx < len(processed_segments) - 1:
+                    audio_out[-fade_samples:] *= np.linspace(1, 0, fade_samples)
                 
-                # Add to result
                 result_audio[start_sample:start_sample + len(audio_out)] += audio_out
-                
-                # Clean up memory after each segment
-                torch.cuda.empty_cache()
         
         progress(0.9, desc=lang["finalizing_audio"])
-        # Trim any extra padding
         result_audio = result_audio[:len(audio)]
         
-        # Create a temporary file to save the result
         with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as temp_file:
             output_path = temp_file.name
         
-        # Save output
         torchaudio.save(output_path, torch.from_numpy(result_audio).unsqueeze(0).float(), sample_rate)
         
         progress(1.0, desc=lang["processing_complete"])
         return (sample_rate, result_audio), lang["conversion_complete"].format(speaker, key_shift)
         
     except RuntimeError as e:
-        # Handle CUDA out of memory errors
         if "CUDA out of memory" in str(e):
-            # Clean up memory
             torch.cuda.empty_cache()
             gc.collect()
             
@@ -401,16 +350,14 @@ def process_with_progress(
         error_trace = traceback.format_exc()
         return None, lang["error_details"].format(str(e), error_trace)
     finally:
-        # Clean up memory
         torch.cuda.empty_cache()
         gc.collect()
 
 def create_ui():
-    # CSS for better styling
     css = """
     .gradio-container {
         font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        position: relative;  /* 为绝对定位提供参考 */
+        position: relative;
     }
     .container {
         max-width: 1200px;
@@ -473,14 +420,12 @@ def create_ui():
     }
     """
     
-    # No need to initialize models automatically - let user provide their model path first
     available_speakers = []
     global current_language
     lang = LANGUAGES[current_language]
     init_message = lang["init_message"]
     
     with gr.Blocks(css=css, theme=gr.themes.Soft(), title=lang["app_title"]) as app:
-        # 悬浮在右上角的语言选择器
         with gr.Row(elem_classes="lang-container"):
             language_selector = gr.Dropdown(
                 choices=["En", "中文"], 
@@ -489,7 +434,6 @@ def create_ui():
                 elem_classes="compact-dropdown"
             )
         
-        # 主标题和描述
         html_header = gr.HTML(f"""
         <div class="title">
             <h1>{lang["main_title"]}</h1>
@@ -500,7 +444,6 @@ def create_ui():
         """)
         
         with gr.Row():
-            # Left column (input parameters)
             with gr.Column(scale=1):
                 with gr.Group():
                     input_markdown = gr.Markdown(lang["input_section"])
@@ -517,6 +460,7 @@ def create_ui():
                     robust_f0 = gr.Radio(choices=[0, 1, 2], value=1, label=lang["pitch_filter"], 
                                         info=lang["pitch_filter_info"], 
                                         elem_id="robust_f0")
+                    batch_size = gr.Slider(minimum=1, maximum=64, step=1, value=1, label=lang["batch_size"], info=lang["batch_size_info"], elem_id="batch_size")
                 
                 with gr.Accordion(lang["adv_cfg_params"], open=True) as adv_cfg_accordion:
                     ds_cfg_strength = gr.Slider(minimum=0.0, maximum=1.0, step=0.01, value=0.1, 
@@ -565,7 +509,6 @@ def create_ui():
                                                   info=lang["slicer_max_sil_info"], 
                                                   elem_id="slicer_max_sil_kept")
             
-            # Right column (output)
             with gr.Column(scale=1):
                 convert_btn = gr.Button(lang["convert_btn"], variant="primary", elem_id="convert_btn")
                 output_markdown = gr.Markdown(lang["output_section"])
@@ -579,32 +522,27 @@ def create_ui():
                 </div>
                 """)
         
-        # Function to update UI language
         def update_language(selected_language):
             global current_language
             current_language = selected_language
             lang = LANGUAGES[current_language]
             
-            # Return updates for all UI elements that need language change
             return [
-                # Input section
                 gr.update(label=lang["model_path_label"], placeholder=lang["model_path_placeholder"]),
                 gr.update(value=lang["load_model_btn"]),
                 gr.update(label=lang["input_audio_label"]),
                 
-                # Basic parameters
                 gr.update(label=lang["target_speaker"]),
                 gr.update(label=lang["key_shift"]),
                 gr.update(label=lang["infer_steps"], info=lang["infer_steps_info"]),
                 gr.update(label=lang["use_fp16"], info=lang["use_fp16_info"]),
                 gr.update(label=lang["pitch_filter"], info=lang["pitch_filter_info"]),
+                gr.update(label=lang["batch_size"], info=lang["batch_size_info"]),
                 
-                # Accordion labels
                 gr.update(label=lang["basic_params"]),
                 gr.update(label=lang["adv_cfg_params"]),
                 gr.update(label=lang["slicer_params"]),
                 
-                # Advanced parameters
                 gr.update(label=lang["ds_cfg_strength"], info=lang["ds_cfg_strength_info"]),
                 gr.update(label=lang["spk_cfg_strength"], info=lang["spk_cfg_strength_info"]),
                 gr.update(label=lang["skip_cfg_strength"], info=lang["skip_cfg_strength_info"]),
@@ -612,20 +550,17 @@ def create_ui():
                 gr.update(label=lang["cfg_rescale"], info=lang["cfg_rescale_info"]),
                 gr.update(label=lang["cvec_downsample"], info=lang["cvec_downsample_info"]),
                 
-                # Slicer parameters
                 gr.update(label=lang["slicer_threshold"], info=lang["slicer_threshold_info"]),
                 gr.update(label=lang["slicer_min_length"], info=lang["slicer_min_length_info"]),
                 gr.update(label=lang["slicer_min_interval"], info=lang["slicer_min_interval_info"]),
                 gr.update(label=lang["slicer_hop_size"], info=lang["slicer_hop_size_info"]),
                 gr.update(label=lang["slicer_max_sil"], info=lang["slicer_max_sil_info"]),
                 
-                # Output section
                 gr.update(value=lang["convert_btn"]),
                 gr.update(value=lang["output_section"]),
                 gr.update(label=lang["output_audio_label"]),
                 gr.update(value=lang["init_message"]),
                 
-                # HTML content
                 gr.update(value=f"""
                 <div class="title">
                     <h1>{lang["main_title"]}</h1>
@@ -641,7 +576,6 @@ def create_ui():
                 </div>
                 """),
                 
-                # Tips HTML
                 gr.update(value=f"""
                 <div class="info-box">
                     <h4>{lang["quick_tips"]}</h4>
@@ -650,37 +584,26 @@ def create_ui():
                 """)
             ]
         
-        # Define button click events
         def load_model_and_update_speakers(model_path):
-            # Call initialize_models to load the model
             available_speakers, message = initialize_models(model_path)
             
-            # Explicitly update the dropdown with new speakers
             if available_speakers and len(available_speakers) > 0:
                 return gr.update(choices=available_speakers, value=available_speakers[0]), message
             else:
                 return gr.update(choices=[], value=None), message
         
-        # Language selector event
         language_selector.change(
             fn=update_language,
             inputs=[language_selector],
             outputs=[
-                # Input section
                 model_path, reload_btn, input_audio,  
-                # Basic parameters
-                speaker, key_shift, infer_steps, use_fp16, robust_f0,  
-                # Accordion labels
+                speaker, key_shift, infer_steps, use_fp16, robust_f0, batch_size,  
                 basic_params_accordion, adv_cfg_accordion, slicer_accordion,  
-                # Advanced parameters
                 ds_cfg_strength, spk_cfg_strength, skip_cfg_strength, 
                 cfg_skip_layers, cfg_rescale, cvec_downsample_rate,
-                # Slicer parameters
                 slicer_threshold, slicer_min_length, slicer_min_interval,
                 slicer_hop_size, slicer_max_sil_kept,
-                # Output section
                 convert_btn, output_markdown, output_audio, output_message,  
-                # HTML content
                 html_header, tips_html
             ]
         )
@@ -691,7 +614,6 @@ def create_ui():
             outputs=[speaker, output_message]
         )
         
-        # Updated convert button click event
         convert_btn.click(
             fn=lambda: LANGUAGES[current_language]["processing"],
             inputs=None,
@@ -701,6 +623,7 @@ def create_ui():
             fn=process_with_progress,
             inputs=[
                 input_audio, speaker, key_shift, infer_steps, robust_f0, use_fp16,
+                batch_size,
                 ds_cfg_strength, spk_cfg_strength, skip_cfg_strength, cfg_skip_layers, cfg_rescale, cvec_downsample_rate,
                 slicer_threshold, slicer_min_length, slicer_min_interval, slicer_hop_size, slicer_max_sil_kept
             ],
@@ -715,7 +638,6 @@ def create_ui():
 @click.option('--language', default='En', help='Default language (en or 中文)')
 def main(share=False, language='En'):
     global current_language
-    # Set default language
     if language in LANGUAGES:
         current_language = language
     else:

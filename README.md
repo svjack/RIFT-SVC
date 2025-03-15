@@ -191,7 +191,8 @@ python infer.py \
 --output 0_steps32_cfg0.wav \
 --speaker speaker1 \
 --key-shift 0 \
---infer-steps 32
+--infer-steps 32 \
+--batch-size 1
 ```
 
 Advanced inference command:
@@ -203,6 +204,7 @@ python infer.py \
 --speaker speaker1 \
 --key-shift 0 \
 --infer-steps 32 \
+--batch-size 4 \
 --ds-cfg-strength 0.1 \
 --spk-cfg-strength 0.2 \
 --skip-cfg-strength 0.1 \
@@ -218,6 +220,7 @@ python infer.py \
 - `--speaker`: The speaker name for voice conversion.
 - `--key-shift`: Pitch shift in semitones (default: 0).
 - `--infer-steps`: The number of inference steps (default: 32). Higher values may produce better quality but take longer.
+- `--batch-size`: Batch size for parallel inference (default: 1). Higher values can speed up inference by processing multiple segments simultaneously, but require more VRAM.
 - `--ds-cfg-strength`: Downsampled content vector guidance strength (default: 0.0). Controls the emphasis on content fidelity. We recommend a initial trial value of 0.1.
 - `--spk-cfg-strength`: Speaker guidance strength (default: 0.0). Higher values enhance speaker characteristics. We recommend a initial trial value of 0.2.
 - `--skip-cfg-strength`: Skip layer guidance strength (default: 0.0). Affects how much the targeted intermediate layer's features are rendered on the output. We recommend a initial trial value of 0.1.
