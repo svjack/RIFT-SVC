@@ -1,5 +1,12 @@
 # RIFT-SVC: Rectified Flow Transformer for Singing Voice Conversion
 
+```bash
+pip uninstall torch torchvision torchaudio -y
+pip install torch==2.6.0 torchvision torchaudio https://github.com/Dao-AILab/flash-attention/releases/download/v2.7.2.post1/flash_attn-2.7.2.post1+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl
+
+pip install pyworld
+```
+
 [中文文档](README_CN.md)
 
 <p align="center"><img src="./assets/logo.png" alt="RIFT-SVC" width="200"/></p>
